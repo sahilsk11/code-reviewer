@@ -112,14 +112,13 @@ def test_discover_transcripts_prefers_exact_pr_matches(tmp_path: Path, monkeypat
     )
 
     assert result == 0
-    summary = json.loads(
-        (tmp_path / ".code-reviews" / "transcripts" / "owner-repo-pr-7-matches.json").read_text(
-            encoding="utf-8"
-        )
-    )
-    assert summary["used_fallback"] is False
-    assert [match["session_id"] for match in summary["matches"]] == ["exact"]
-    normalized = json.loads(Path(summary["matches"][0]["normalized_path"]).read_text())
+    report_path = tmp_path / ".code-reviews" / "transcripts" / "owner-repo-pr-7-candidates.md"
+    report = report_path.read_text(encoding="utf-8")
+    assert "Used fallback repo-only matches: `false`" in report
+    assert "Session: `exact`" in report
+    assert "Session: `fallback`" not in report
+    normalized_path = tmp_path / ".code-reviews" / "transcripts" / "exact.json"
+    normalized = json.loads(normalized_path.read_text())
     assert [message["role"] for message in normalized["messages"]] == ["user", "assistant"]
 
 

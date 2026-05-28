@@ -90,8 +90,10 @@ code_reviewer.commands.discover_transcripts
 code_reviewer.commands.cleanup_worktree
 ```
 
-Agent nodes handle intent summarization, parallel review, aggregation, and
-publishing.
+`discover_transcripts` is a helper for the transcript-selection agent: it writes
+a readable candidate report plus normalized transcript files. Agent nodes handle
+canonical transcript selection, intent summarization, parallel review,
+aggregation, and publishing.
 
 ## Verification
 

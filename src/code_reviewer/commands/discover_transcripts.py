@@ -76,20 +76,68 @@ def main(argv: list[str] | None = None) -> int:
     summary_name = "unknown-pr"
     if repository and pr_number:
         summary_name = f"{sanitize_path_part(repository.replace('/', '-'))}-pr-{pr_number}"
-    summary_path = output_root / f"{summary_name}-matches.json"
-    write_json(
-        summary_path,
-        {
-            "payload": payload,
-            "cleaner": args.cleaner,
-            "exact_terms": exact_terms,
-            "fallback_terms": fallback_terms,
-            "used_fallback": not bool(exact_matches),
-            "matches": matches,
-        },
+    report_path = output_root / f"{summary_name}-candidates.md"
+    report_path.write_text(
+        render_candidate_report(
+            payload=payload,
+            cleaner=args.cleaner,
+            exact_terms=exact_terms,
+            fallback_terms=fallback_terms,
+            used_fallback=not bool(exact_matches),
+            matches=matches,
+        ),
+        encoding="utf-8",
     )
-    print(summary_path)
+    print(report_path)
     return 0
+
+
+def render_candidate_report(
+    *,
+    payload: dict[str, Any],
+    cleaner: str,
+    exact_terms: list[str],
+    fallback_terms: list[str],
+    used_fallback: bool,
+    matches: list[dict[str, Any]],
+) -> str:
+    lines = [
+        "# Transcript Candidates",
+        "",
+        f"- Cleaner: `{cleaner}`",
+        f"- PR URL: `{payload.get('pull_request_url') or 'unknown'}`",
+        f"- Head SHA: `{payload.get('head_sha') or 'unknown'}`",
+        f"- Used fallback repo-only matches: `{str(used_fallback).lower()}`",
+        "",
+        "## Exact Search Terms",
+        "",
+    ]
+    lines.extend(f"- `{term}`" for term in exact_terms)
+    if not exact_terms:
+        lines.append("- none")
+    lines.extend(["", "## Fallback Search Terms", ""])
+    lines.extend(f"- `{term}`" for term in fallback_terms)
+    if not fallback_terms:
+        lines.append("- none")
+    lines.extend(["", "## Candidates", ""])
+    if not matches:
+        lines.append("No transcript candidates found.")
+    for index, match in enumerate(matches, start=1):
+        lines.extend(
+            [
+                f"### {index}. {match.get('title') or match['session_id']}",
+                "",
+                f"- Session: `{match['session_id']}`",
+                f"- Source transcript: `{match['source_path']}`",
+                f"- Normalized transcript: `{match['normalized_path']}`",
+                f"- Project path: `{match.get('project_path') or 'unknown'}`",
+                f"- Message count: `{match['message_count']}`",
+                "- Matched terms:",
+            ]
+        )
+        lines.extend(f"  - `{term}`" for term in match["matched_terms"])
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def build_search_terms(

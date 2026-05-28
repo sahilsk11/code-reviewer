@@ -16,7 +16,7 @@ worktree:
 
 kanna:
   baseUrl: http://127.0.0.1:3210
-  taskName: "AI Code Review"
+  taskName: "Code Review"
   chatTitleTemplate: "{{nodeId}}"
   timeoutMs: 1800000
 
@@ -28,14 +28,40 @@ nodes:
         --payload-json "$ARGUMENTS" \
         --worktree-root "$HOME/wt"
 
-  - id: discover_transcripts
-    bash: |
-      set -euo pipefail
+  - id: find_implementation_transcript
+    context: fresh
+    model: gpt-5.5
+    effort: medium
+    prompt: |
+      Identify the canonical implementation transcript for this pull request, if one exists.
+
+      Original review payload:
+      $ARGUMENTS
+
+      Use this helper command to produce normalized candidate transcripts and a
+      readable candidate report:
+
+      ```sh
       "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.discover_transcripts \
-        --payload-json "$ARGUMENTS" \
+        --payload-json '$ARGUMENTS' \
         --kanna-root "$HOME/.kanna" \
         --cleaner loki \
         --optional
+      ```
+
+      Then inspect the candidate report and read only the normalized transcript
+      files needed to decide which session actually contains the implementation
+      work for this PR. Prefer transcripts that include the PR URL, PR shorthand,
+      branch/head SHA, implementation discussion, commits, review fixes, or final
+      PR handoff. Do not select a transcript merely because it mentions the repo
+      or uses this PR as sample/demo data.
+
+      Output concise Markdown:
+      - Selected transcript: `<normalized transcript path>` or `none`
+      - Source transcript: `<source transcript path>` or `none`
+      - Confidence: high, medium, low, or none
+      - Reason: 1-3 bullets explaining why this is the implementation transcript
+      - Useful quotes: at most 3 short user quotes, only if they clarify intent
 
   - id: summarize_intent
     context: fresh
@@ -50,8 +76,8 @@ nodes:
       Prepared worktree:
       $prepare_worktree.output
 
-      Optional transcript discovery:
-      $discover_transcripts.output
+      Canonical implementation transcript:
+      $find_implementation_transcript.output
 
       Gather the PR context you need directly using the GitHub CLI/API and the
       prepared worktree. Do not rely on a prebuilt artifact bundle.
@@ -62,7 +88,8 @@ nodes:
         issue keys, or PR references.
       - Prior PR issue comments, review comments, and review threads.
       - Reviewer controls: pause, resume, full, incremental, ignore, and resolve.
-      - Cleaned Kanna transcript JSON when transcript discovery found matches.
+      - The selected cleaned Kanna transcript when `find_implementation_transcript`
+        selected one.
       - User-facing or system flows affected by the change.
 
       Produce a concise Markdown brief with:
@@ -77,7 +104,7 @@ nodes:
       - Any missing context that reviewers should not guess around.
 
       Do not perform the code review in this node.
-    depends_on: [prepare_worktree, discover_transcripts]
+    depends_on: [prepare_worktree, find_implementation_transcript]
 
   - id: reviewer_correctness_regressions
     context: fresh
@@ -108,8 +135,9 @@ nodes:
         unless that is the best practical verification for the risk.
       - Respect prior human replies, ignore controls, and resolve controls from the brief.
       - Avoid duplicate comments already present on the PR.
-      - Output structured findings as JSON: stable_id, file, line/range, severity,
-        blocking boolean, confidence, evidence, and proposed GitHub comment.
+      - Output readable Markdown findings. Each finding must include stable id,
+        file, line/range, severity, blocking boolean, confidence, evidence, and
+        proposed GitHub comment text.
     depends_on: [summarize_intent]
 
   - id: reviewer_design_layering_reuse
@@ -143,8 +171,9 @@ nodes:
       - Avoid subjective style feedback. Tie every finding to real maintainability,
         correctness, reuse, or future-change risk.
       - Respect prior comments and human replies before proposing repeat feedback.
-      - Output structured findings as JSON: stable_id, file, line/range, severity,
-        blocking boolean, confidence, evidence, and proposed GitHub comment.
+      - Output readable Markdown findings. Each finding must include stable id,
+        file, line/range, severity, blocking boolean, confidence, evidence, and
+        proposed GitHub comment text.
     depends_on: [summarize_intent]
 
   - id: reviewer_simplicity_alternatives
@@ -176,8 +205,9 @@ nodes:
       - Do not raise style feedback, preference-only feedback, or speculative
         architecture advice.
       - Respect prior comments and human replies before proposing repeat feedback.
-      - Output structured findings as JSON: stable_id, file, line/range, severity,
-        blocking boolean, confidence, evidence, and proposed GitHub comment.
+      - Output readable Markdown findings. Each finding must include stable id,
+        file, line/range, severity, blocking boolean, confidence, evidence, and
+        proposed GitHub comment text.
     depends_on: [summarize_intent]
 
   - id: aggregate_dedupe
@@ -216,8 +246,10 @@ nodes:
       - Keep useful design tradeoffs in the summary when they are not actionable
         enough for inline comments.
       - Prefer fewer, clearer inline comments over broad summaries.
-      - Produce final JSON with summary, final findings, skipped findings, stale-comment
-        actions, and check conclusion.
+      - Produce readable Markdown with summary, final findings, skipped findings,
+        stale-comment actions, and check conclusion.
+      - End with one fenced `json` block named `publish_payload` containing the
+        final publishable structure for the publish node.
     depends_on:
       - reviewer_correctness_regressions
       - reviewer_design_layering_reuse

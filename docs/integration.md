@@ -43,6 +43,14 @@ code-review review \
 In dry-run mode, the publish node renders the summary comment, inline comments,
 and check conclusion it would have sent to GitHub.
 
+## Transcript Context
+
+The workflow does not pass every matching transcript into the review. A
+transcript-selection agent first runs the transcript helper, inspects the
+candidate report and normalized files, and selects one canonical implementation
+transcript when one is available. If no implementation transcript is obvious,
+the review continues without transcript context.
+
 ## Dedupe Strategy
 
 Each finding should have a stable ID derived from path, line, category, and the
