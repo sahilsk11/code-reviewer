@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "code-reviewer"
+version = "0.1.0"
+description = "Thin CLI wrapper for an Archon-powered PR reviewer."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [
+  { name = "Sahil Kapur" },
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+]
+
+[project.scripts]
+code-review = "code_reviewer.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_reviewer"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/code_reviewer/workflows/ai-code-review.yaml" = "code_reviewer/workflows/ai-code-review.yaml"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

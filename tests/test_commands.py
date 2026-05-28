@@ -1,0 +1,148 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+from code_reviewer.commands import cleanup_worktree, discover_transcripts, prepare_worktree
+
+
+def test_prepare_worktree_writes_manifest_without_dirtying_worktree(tmp_path: Path) -> None:
+    source_repo = tmp_path / "repo"
+    source_repo.mkdir()
+    manifest_path = tmp_path / "manifest.json"
+    payload = {
+        "repo": str(source_repo),
+        "pull_request_url": "https://github.com/owner/repo/pull/3",
+        "head_sha": "abc1234567890",
+        "mode": "full",
+    }
+    pr = {
+        "url": "https://github.com/owner/repo/pull/3",
+        "number": 3,
+        "headRefOid": "abc1234567890",
+        "baseRefOid": "def456",
+        "headRepository": {"nameWithOwner": "owner/repo"},
+        "headRefName": "feature",
+        "baseRefName": "main",
+    }
+
+    with (
+        patch.object(prepare_worktree, "resolve_pr", return_value=pr),
+        patch.object(prepare_worktree, "fetch_pr"),
+        patch.object(prepare_worktree, "manifest_path_for", return_value=manifest_path),
+        patch.object(prepare_worktree, "run") as run,
+    ):
+        result = prepare_worktree.main(
+            [
+                "--payload-json",
+                json.dumps(payload),
+                "--worktree-root",
+                str(tmp_path / "wt"),
+            ]
+        )
+
+    assert result == 0
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["head_sha"] == "abc1234567890"
+    assert manifest["repository"] == "owner/repo"
+    assert manifest["worktree_path"].endswith("code-review-owner-repo-pr-3-abc123456789")
+    assert not Path(manifest["worktree_path"], ".code-review-manifest.json").exists()
+    assert run.call_args.args[0][:4] == ["git", "worktree", "add", "--detach"]
+
+
+def test_discover_transcripts_prefers_exact_pr_matches(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    data_dir = tmp_path / ".kanna" / "data"
+    transcripts = data_dir / "transcripts"
+    transcripts.mkdir(parents=True)
+    (data_dir / "snapshot.json").write_text(
+        json.dumps(
+            {
+                "chats": [
+                    {"id": "exact", "title": "Exact", "projectId": "p1"},
+                    {"id": "fallback", "title": "Fallback", "projectId": "p1"},
+                ],
+                "projects": [{"id": "p1", "localPath": "/repo"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (transcripts / "exact.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "_id": "u1",
+                        "kind": "user_prompt",
+                        "createdAt": 1,
+                        "content": "see https://github.com/owner/repo/pull/7",
+                    }
+                ),
+                json.dumps({"_id": "a1", "kind": "assistant_text", "createdAt": 2, "text": "ok"}),
+                json.dumps({"_id": "tool", "kind": "tool_call", "createdAt": 3, "name": "bash"}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (transcripts / "fallback.jsonl").write_text(
+        json.dumps(
+            {
+                "_id": "u2",
+                "kind": "user_prompt",
+                "createdAt": 4,
+                "content": "owner/repo but not the PR",
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "pull_request_url": "https://github.com/owner/repo/pull/7",
+        "head_sha": "abc123",
+    }
+
+    result = discover_transcripts.main(
+        [
+            "--payload-json",
+            json.dumps(payload),
+            "--kanna-root",
+            str(tmp_path / ".kanna"),
+            "--optional",
+        ]
+    )
+
+    assert result == 0
+    summary = json.loads(
+        (tmp_path / ".code-reviews" / "transcripts" / "owner-repo-pr-7-matches.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert summary["used_fallback"] is False
+    assert [match["session_id"] for match in summary["matches"]] == ["exact"]
+    normalized = json.loads(Path(summary["matches"][0]["normalized_path"]).read_text())
+    assert [message["role"] for message in normalized["messages"]] == ["user", "assistant"]
+
+
+def test_cleanup_worktree_strips_archon_wrapping_quotes(tmp_path: Path) -> None:
+    source_repo = tmp_path / "repo"
+    source_repo.mkdir()
+    worktree = Path.home() / "wt" / "code-review-test-quote-cleanup"
+    worktree.mkdir(parents=True, exist_ok=True)
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "managed_by": "code-reviewer",
+                "source_repo": str(source_repo),
+                "worktree_path": str(worktree),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with patch.object(cleanup_worktree, "run") as run:
+        result = cleanup_worktree.main(["--worktree-manifest", f"'{manifest}'"])
+
+    assert result == 0
+    assert not worktree.exists()
+    assert run.call_args_list[0].args[0][:3] == ["git", "worktree", "remove"]

@@ -1,0 +1,277 @@
+name: ai-code-review
+description: |
+  Use when: A GitHub pull request needs a required AI Code Review check backed by
+  Archon and the code-review Python CLI.
+  Input: JSON from the code-review CLI with repo URL/path, PR URL/number, exact
+  head SHA, base SHA when available, and requested review mode.
+  Output: Stable PR summary comment, high-confidence inline comments, final check
+  conclusion, and cleaned-up temporary worktree.
+  NOT for: Ad hoc local linting, broad product planning, or non-PR review.
+
+provider: codex
+model: gpt-5.5
+modelReasoningEffort: high
+worktree:
+  enabled: false
+
+kanna:
+  baseUrl: http://127.0.0.1:3210
+  taskName: "AI Code Review"
+  chatTitleTemplate: "{{nodeId}}"
+  timeoutMs: 1800000
+
+nodes:
+  - id: prepare_worktree
+    bash: |
+      set -euo pipefail
+      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.prepare_worktree \
+        --payload-json "$ARGUMENTS" \
+        --worktree-root "$HOME/wt"
+
+  - id: discover_transcripts
+    bash: |
+      set -euo pipefail
+      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.discover_transcripts \
+        --payload-json "$ARGUMENTS" \
+        --kanna-root "$HOME/.kanna" \
+        --cleaner loki \
+        --optional
+
+  - id: summarize_intent
+    context: fresh
+    model: gpt-5.5
+    effort: high
+    prompt: |
+      Create the shared intent and context brief for this pull request.
+
+      Original review payload:
+      $ARGUMENTS
+
+      Prepared worktree:
+      $prepare_worktree.output
+
+      Optional transcript discovery:
+      $discover_transcripts.output
+
+      Gather the PR context you need directly using the GitHub CLI/API and the
+      prepared worktree. Do not rely on a prebuilt artifact bundle.
+
+      Required context to inspect:
+      - PR title, body, commits, base/head SHAs, changed files, and diff overview.
+      - Linked ticket if one is obvious from the branch name, PR body, commits,
+        issue keys, or PR references.
+      - Prior PR issue comments, review comments, and review threads.
+      - Reviewer controls: pause, resume, full, incremental, ignore, and resolve.
+      - Cleaned Kanna transcript JSON when transcript discovery found matches.
+      - User-facing or system flows affected by the change.
+
+      Produce a concise Markdown brief with:
+      - What the PR is trying to achieve.
+      - Specific user requests, constraints, and non-goals.
+      - Any likely user intent drift: places where the implementation might solve
+        an adjacent problem instead of the requested one.
+      - Prior review comments and human replies that should affect this run.
+      - Quotes from PR text or transcript messages when they materially support intent.
+      - Linked-ticket context that materially changes how the diff should be read.
+      - A short list of affected flows that reviewers should trace beyond the diff.
+      - Any missing context that reviewers should not guess around.
+
+      Do not perform the code review in this node.
+    depends_on: [prepare_worktree, discover_transcripts]
+
+  - id: reviewer_correctness_regressions
+    context: fresh
+    model: gpt-5.5
+    effort: high
+    prompt: |
+      Review this PR for correctness and regressions.
+
+      Original review payload:
+      $ARGUMENTS
+
+      Prepared worktree:
+      $prepare_worktree.output
+
+      Review brief:
+      $summarize_intent.output
+
+      Requirements:
+      - Review exactly the supplied head SHA, never a moving branch reference.
+      - Trace affected code paths beyond the diff when needed to understand the
+        actual runtime behavior.
+      - Focus on concrete defects with high confidence: broken flows, edge cases,
+        stale state, async/concurrency mistakes, data loss, permission mistakes,
+        missing cleanup, and regressions to existing behavior.
+      - Evaluate whether the PR includes useful real verification for behavioral
+        functionality, such as an end-to-end check, screenshot, browser exercise,
+        API smoke test, or command output. Do not complain about missing unit tests
+        unless that is the best practical verification for the risk.
+      - Respect prior human replies, ignore controls, and resolve controls from the brief.
+      - Avoid duplicate comments already present on the PR.
+      - Output structured findings as JSON: stable_id, file, line/range, severity,
+        blocking boolean, confidence, evidence, and proposed GitHub comment.
+    depends_on: [summarize_intent]
+
+  - id: reviewer_design_layering_reuse
+    context: fresh
+    model: gpt-5.5
+    effort: high
+    prompt: |
+      Review this PR for design, layering, abstraction boundaries, and reuse.
+
+      Original review payload:
+      $ARGUMENTS
+
+      Prepared worktree:
+      $prepare_worktree.output
+
+      Review brief:
+      $summarize_intent.output
+
+      Requirements:
+      - Review exactly the supplied head SHA, never a moving branch reference.
+      - Explore the surrounding codebase when needed, not only the diff.
+      - Check whether similar behavior, components, helpers, services, or provider
+        abstractions already exist and should have been reused.
+      - Identify duplicated behavior introduced by the PR.
+      - Check whether files/modules are taking on the right responsibilities or
+        becoming dumping grounds.
+      - Check whether concerns should be split into components, utilities,
+        classes, services, adapters, or provider-specific modules.
+      - Check whether provider/vendor details leak across layers instead of being
+        hidden behind local abstractions.
+      - Avoid subjective style feedback. Tie every finding to real maintainability,
+        correctness, reuse, or future-change risk.
+      - Respect prior comments and human replies before proposing repeat feedback.
+      - Output structured findings as JSON: stable_id, file, line/range, severity,
+        blocking boolean, confidence, evidence, and proposed GitHub comment.
+    depends_on: [summarize_intent]
+
+  - id: reviewer_simplicity_alternatives
+    context: fresh
+    model: gpt-5.5
+    effort: medium
+    prompt: |
+      Review this PR for simplicity, directness, and better alternatives.
+
+      Original review payload:
+      $ARGUMENTS
+
+      Prepared worktree:
+      $prepare_worktree.output
+
+      Review brief:
+      $summarize_intent.output
+
+      Requirements:
+      - Review exactly the supplied head SHA, never a moving branch reference.
+      - Decide whether the implementation is the simplest good solution for the
+        actual user intent.
+      - Look for roundabout implementations, unnecessary machinery, premature
+        abstractions, avoidable state, overbroad refactors, or complex approaches
+        where a local pattern would have been cleaner.
+      - Identify better alternatives only when they are concrete and materially
+        better. It is acceptable to say the current approach is reasonable.
+      - Separate actionable review comments from summary-only tradeoffs.
+      - Do not raise style feedback, preference-only feedback, or speculative
+        architecture advice.
+      - Respect prior comments and human replies before proposing repeat feedback.
+      - Output structured findings as JSON: stable_id, file, line/range, severity,
+        blocking boolean, confidence, evidence, and proposed GitHub comment.
+    depends_on: [summarize_intent]
+
+  - id: aggregate_dedupe
+    context: fresh
+    model: gpt-5.5
+    effort: high
+    prompt: |
+      Aggregate the multi-agent review into the final publishable result.
+
+      Original review payload:
+      $ARGUMENTS
+
+      Prepared worktree:
+      $prepare_worktree.output
+
+      Review brief:
+      $summarize_intent.output
+
+      Correctness/regressions reviewer:
+      $reviewer_correctness_regressions.output
+
+      Design/layering/reuse reviewer:
+      $reviewer_design_layering_reuse.output
+
+      Simplicity/alternatives reviewer:
+      $reviewer_simplicity_alternatives.output
+
+      Requirements:
+      - Deduplicate findings across reviewers by root cause, not only by line.
+      - Re-read prior comments and replies from GitHub before finalizing.
+      - Suppress findings already rejected by a human unless new evidence changes the answer.
+      - Suppress duplicate findings already posted for the same head SHA.
+      - Preserve blocking findings only when they should fail the required check.
+      - Drop unit-test-only complaints unless they identify the most useful
+        verification for a concrete behavioral risk.
+      - Keep useful design tradeoffs in the summary when they are not actionable
+        enough for inline comments.
+      - Prefer fewer, clearer inline comments over broad summaries.
+      - Produce final JSON with summary, final findings, skipped findings, stale-comment
+        actions, and check conclusion.
+    depends_on:
+      - reviewer_correctness_regressions
+      - reviewer_design_layering_reuse
+      - reviewer_simplicity_alternatives
+
+  - id: publish_review
+    context: fresh
+    model: gpt-5.5
+    effort: high
+    prompt: |
+      Publish the final AI Code Review result to GitHub.
+
+      Original review payload:
+      $ARGUMENTS
+
+      Prepared worktree:
+      $prepare_worktree.output
+
+      Review brief:
+      $summarize_intent.output
+
+      Final deduped review:
+      $aggregate_dedupe.output
+
+      Requirements:
+      - If the original review payload has `dry_run: true`, do not create,
+        update, or delete any GitHub comments, reviews, or checks. Produce the
+        exact summary/comment/check payloads that would have been published.
+      - Use the GitHub CLI/API from the prepared worktree.
+      - Update one stable PR summary comment identified by a hidden
+        `code-review:summary` marker.
+      - Include reviewed SHA, review mode, status, blocking count, non-blocking
+        count, and skipped/deduped count.
+      - Post high-confidence inline comments from the final finding list.
+      - Include hidden stable finding metadata in posted inline comments.
+      - Mark older summary comments stale when they refer to older SHAs.
+      - Avoid reposting duplicate inline comments.
+      - Set the `AI Code Review` check conclusion to failure only when blocking
+        findings remain; otherwise set it to success.
+      - If GitHub publishing fails, diagnose and fix ordinary scripting/API
+        mistakes, then retry once. If credentials or permissions are missing,
+        report the exact blocker.
+
+      Output:
+      - Summary comment URL or publishing blocker.
+      - Inline comments posted, skipped as duplicates, or suppressed by controls.
+      - Final check conclusion and reason.
+      - In dry-run mode, the would-be summary comment body, inline comments, and
+        check conclusion instead of GitHub URLs.
+    depends_on: [aggregate_dedupe]
+
+  - id: cleanup_worktree
+    bash: |
+      set -euo pipefail
+      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.cleanup_worktree \
+        --worktree-manifest "$prepare_worktree.output"
+    depends_on: [publish_review]
