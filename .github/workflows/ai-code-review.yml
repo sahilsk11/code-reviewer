@@ -17,18 +17,24 @@ jobs:
   review:
     name: AI Code Review
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event.pull_request.draft == false
     steps:
       - name: Checkout exact PR head
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
 
       - name: Install Archon
         run: |
@@ -38,17 +44,76 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           archon version
 
+      - name: Install OpenCode
+        run: |
+          npm install -g opencode-ai@1.15.12
+          opencode --version
+
+      - name: Configure OpenCode
+        env:
+          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+        run: |
+          test -n "$OPENCODE_API_KEY"
+          mkdir -p "$HOME/.local/share/opencode" "$HOME/.config/opencode"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          auth_path = Path.home() / ".local/share/opencode/auth.json"
+          auth_path.write_text(
+              json.dumps(
+                  {
+                      "opencode-go": {
+                          "type": "api",
+                          "key": os.environ["OPENCODE_API_KEY"],
+                      }
+                  }
+              )
+          )
+          PY
+          chmod 600 "$HOME/.local/share/opencode/auth.json"
+          python -m json.tool "$HOME/.local/share/opencode/auth.json" > /dev/null
+          cat > "$HOME/.config/opencode/opencode.json" <<'JSON'
+          {
+            "$schema": "https://opencode.ai/config.json",
+            "permission": {
+              "external_directory": {
+                "/home/runner/**": "allow"
+              }
+            }
+          }
+          JSON
+
+      - name: Install review tooling
+        run: |
+          python -m pip install uv PyYAML
+
       - name: Install code-reviewer
         run: |
-          python -m pip install git+https://github.com/sahilsk11/code-reviewer.git
+          python -m pip install -e .
+          code-review --version
 
       - name: Run AI Code Review
         env:
           GH_TOKEN: ${{ github.token }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          code-review review \
-            --repo . \
-            --event-path "$GITHUB_EVENT_PATH" \
-            --head-sha "$PR_HEAD_SHA" \
-            --mode incremental
+          set +e
+          for attempt in 1 2; do
+            log_file="$RUNNER_TEMP/code-review-attempt-$attempt.log"
+            code-review review \
+              --repo . \
+              --event-path "$GITHUB_EVENT_PATH" \
+              --head-sha "$PR_HEAD_SHA" \
+              --mode incremental 2>&1 | tee "$log_file"
+            status="${PIPESTATUS[0]}"
+
+            if [ "$status" -eq 247 ] && [ "$attempt" -eq 1 ] && ! grep -q '\[publish_review\] Started' "$log_file"; then
+              echo "Archon/OpenCode exited 247 before publishing started; retrying once."
+              sleep 10
+              continue
+            fi
+
+            exit "$status"
+          done

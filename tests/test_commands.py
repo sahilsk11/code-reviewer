@@ -152,7 +152,7 @@ def test_finalize_review_fails_for_blocking_publish_payload(tmp_path: Path) -> N
 Summary
 
 ```json publish_payload
-{"blocking_count": 1, "check_conclusion": "failure", "findings": []}
+{"blocking_count": 1, "non_blocking_count": 0, "check_conclusion": "failure", "findings": []}
 ```
 """
 
@@ -170,10 +170,56 @@ Summary
     cleanup.assert_called_once()
 
 
+def test_finalize_review_rejects_nested_publish_payload(tmp_path: Path) -> None:
+    aggregate_output = """
+```json
+{
+  "publish_payload": {
+    "blocking_count": 1,
+    "check_conclusion": "failure",
+    "findings": []
+  }
+}
+```
+"""
+
+    with patch.object(cleanup_worktree, "main", return_value=0):
+        result = finalize_review.main(
+            [
+                "--aggregate-output",
+                aggregate_output,
+                "--worktree-manifest",
+                str(tmp_path / "manifest.json"),
+            ]
+        )
+
+    assert result == 1
+
+
+def test_finalize_review_uses_blocking_count_for_check_result(tmp_path: Path) -> None:
+    aggregate_output = """
+```json publish_payload
+{"blocking_count": 0, "non_blocking_count": 0, "check_conclusion": "failure", "findings": []}
+```
+"""
+
+    with patch.object(cleanup_worktree, "main", return_value=0):
+        result = finalize_review.main(
+            [
+                "--aggregate-output",
+                aggregate_output,
+                "--worktree-manifest",
+                str(tmp_path / "manifest.json"),
+            ]
+        )
+
+    assert result == 0
+
+
 def test_finalize_review_succeeds_without_blocking_findings(tmp_path: Path) -> None:
     aggregate_output = """
 ```json publish_payload
-{"blocking_count": 0, "check_conclusion": "success", "findings": []}
+{"blocking_count": 0, "non_blocking_count": 0, "check_conclusion": "success", "findings": []}
 ```
 """
 
@@ -195,7 +241,7 @@ def test_finalize_review_reads_publish_payload_from_file(tmp_path: Path) -> None
     aggregate_output.write_text(
         """
 ```json publish_payload
-{"blocking_count": 1, "check_conclusion": "failure", "findings": []}
+{"blocking_count": 1, "non_blocking_count": 0, "check_conclusion": "failure", "findings": []}
 ```
 """
     )
