@@ -12,7 +12,9 @@ license = { text = "MIT" }
 authors = [
   { name = "Sahil Kapur" },
 ]
-dependencies = []
+dependencies = [
+  "braintrust",
+]
 
 [project.optional-dependencies]
 dev = [
