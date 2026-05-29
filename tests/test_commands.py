@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from code_reviewer.commands import cleanup_worktree, discover_transcripts, prepare_worktree
+from code_reviewer.commands import cleanup_worktree, discover_transcripts, finalize_review, prepare_worktree
 
 
 def test_prepare_worktree_writes_manifest_without_dirtying_worktree(tmp_path: Path) -> None:
@@ -145,3 +145,46 @@ def test_cleanup_worktree_strips_archon_wrapping_quotes(tmp_path: Path) -> None:
     assert result == 0
     assert not worktree.exists()
     assert run.call_args_list[0].args[0][:3] == ["git", "worktree", "remove"]
+
+
+def test_finalize_review_fails_for_blocking_publish_payload(tmp_path: Path) -> None:
+    aggregate_output = """
+Summary
+
+```json publish_payload
+{"blocking_count": 1, "check_conclusion": "failure", "findings": []}
+```
+"""
+
+    with patch.object(cleanup_worktree, "main", return_value=0) as cleanup:
+        result = finalize_review.main(
+            [
+                "--aggregate-output",
+                aggregate_output,
+                "--worktree-manifest",
+                str(tmp_path / "manifest.json"),
+            ]
+        )
+
+    assert result == 1
+    cleanup.assert_called_once()
+
+
+def test_finalize_review_succeeds_without_blocking_findings(tmp_path: Path) -> None:
+    aggregate_output = """
+```json publish_payload
+{"blocking_count": 0, "check_conclusion": "success", "findings": []}
+```
+"""
+
+    with patch.object(cleanup_worktree, "main", return_value=0):
+        result = finalize_review.main(
+            [
+                "--aggregate-output",
+                aggregate_output,
+                "--worktree-manifest",
+                str(tmp_path / "manifest.json"),
+            ]
+        )
+
+    assert result == 0

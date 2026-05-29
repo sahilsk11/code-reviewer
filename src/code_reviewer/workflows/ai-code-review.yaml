@@ -9,16 +9,11 @@ description: |
   NOT for: Ad hoc local linting, broad product planning, or non-PR review.
 
 provider: codex
-model: gpt-5.5
+model: gpt-5.3-codex-spark
 modelReasoningEffort: high
 worktree:
   enabled: false
 
-kanna:
-  baseUrl: http://127.0.0.1:3210
-  taskName: "Code Review"
-  chatTitleTemplate: "{{nodeId}}"
-  timeoutMs: 1800000
 
 nodes:
   - id: prepare_worktree
@@ -30,7 +25,7 @@ nodes:
 
   - id: find_implementation_transcript
     context: fresh
-    model: gpt-5.5
+    model: gpt-5.3-codex-spark
     effort: medium
     prompt: |
       Identify the canonical implementation transcript for this pull request, if one exists.
@@ -65,7 +60,7 @@ nodes:
 
   - id: summarize_intent
     context: fresh
-    model: gpt-5.5
+    model: gpt-5.3-codex-spark
     effort: high
     prompt: |
       Create the shared intent and context brief for this pull request.
@@ -108,7 +103,7 @@ nodes:
 
   - id: reviewer_correctness_regressions
     context: fresh
-    model: gpt-5.5
+    model: gpt-5.3-codex-spark
     effort: high
     prompt: |
       Review this PR for correctness and regressions.
@@ -142,7 +137,7 @@ nodes:
 
   - id: reviewer_design_layering_reuse
     context: fresh
-    model: gpt-5.5
+    model: gpt-5.3-codex-spark
     effort: high
     prompt: |
       Review this PR for design, layering, abstraction boundaries, and reuse.
@@ -178,7 +173,7 @@ nodes:
 
   - id: reviewer_simplicity_alternatives
     context: fresh
-    model: gpt-5.5
+    model: gpt-5.3-codex-spark
     effort: medium
     prompt: |
       Review this PR for simplicity, directness, and better alternatives.
@@ -212,7 +207,7 @@ nodes:
 
   - id: aggregate_dedupe
     context: fresh
-    model: gpt-5.5
+    model: gpt-5.3-codex-spark
     effort: high
     prompt: |
       Aggregate the multi-agent review into the final publishable result.
@@ -249,7 +244,9 @@ nodes:
       - Produce readable Markdown with summary, final findings, skipped findings,
         stale-comment actions, and check conclusion.
       - End with one fenced `json` block named `publish_payload` containing the
-        final publishable structure for the publish node.
+        final publishable structure for the publish node. This object must include
+        `blocking_count`, `non_blocking_count`, `check_conclusion` (`success` or
+        `failure`), and `findings` with stable ids and `blocking` booleans.
     depends_on:
       - reviewer_correctness_regressions
       - reviewer_design_layering_reuse
@@ -257,7 +254,7 @@ nodes:
 
   - id: publish_review
     context: fresh
-    model: gpt-5.5
+    model: gpt-5.3-codex-spark
     effort: high
     prompt: |
       Publish the final AI Code Review result to GitHub.
@@ -304,6 +301,7 @@ nodes:
   - id: cleanup_worktree
     bash: |
       set -euo pipefail
-      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.cleanup_worktree \
+      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.finalize_review \
+        --aggregate-output "$aggregate_dedupe.output" \
         --worktree-manifest "$prepare_worktree.output"
     depends_on: [publish_review]
