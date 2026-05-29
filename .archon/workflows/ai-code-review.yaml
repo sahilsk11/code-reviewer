@@ -8,9 +8,8 @@ description: |
   conclusion, and cleaned-up temporary worktree.
   NOT for: Ad hoc local linting, broad product planning, or non-PR review.
 
-provider: codex
-model: gpt-5.5
-modelReasoningEffort: high
+provider: opencode
+model: opencode-go/deepseek-v4-pro
 additionalDirectories:
   - /home/code-reviewer/wt
   - /home/code-reviewer/.kanna
@@ -28,7 +27,7 @@ nodes:
 
   - id: find_implementation_transcript
     context: fresh
-    model: gpt-5.5
+    model: opencode-go/deepseek-v4-pro
     idle_timeout: 600000
     retry:
       max_attempts: 1
@@ -67,7 +66,7 @@ nodes:
 
   - id: summarize_intent
     context: fresh
-    model: gpt-5.5
+    model: opencode-go/deepseek-v4-pro
     idle_timeout: 600000
     retry:
       max_attempts: 1
@@ -129,7 +128,7 @@ nodes:
 
   - id: reviewer_correctness_regressions
     context: fresh
-    model: gpt-5.5
+    model: opencode-go/deepseek-v4-pro
     idle_timeout: 600000
     retry:
       max_attempts: 1
@@ -174,7 +173,7 @@ nodes:
 
   - id: reviewer_design_layering_reuse
     context: fresh
-    model: gpt-5.5
+    model: opencode-go/deepseek-v4-pro
     idle_timeout: 600000
     retry:
       max_attempts: 1
@@ -221,7 +220,7 @@ nodes:
 
   - id: reviewer_simplicity_alternatives
     context: fresh
-    model: gpt-5.5
+    model: opencode-go/deepseek-v4-pro
     idle_timeout: 600000
     retry:
       max_attempts: 1
@@ -266,7 +265,7 @@ nodes:
 
   - id: aggregate_dedupe
     context: fresh
-    model: gpt-5.5
+    model: opencode-go/deepseek-v4-pro
     idle_timeout: 600000
     retry:
       max_attempts: 1
@@ -358,7 +357,7 @@ nodes:
 
   - id: publish_review
     context: fresh
-    model: gpt-5.5
+    model: opencode-go/deepseek-v4-pro
     idle_timeout: 600000
     retry:
       max_attempts: 1
