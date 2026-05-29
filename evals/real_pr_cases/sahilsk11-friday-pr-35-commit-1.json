@@ -1,7 +1,32 @@
 {
   "captured_at": "2026-05-29T01:38:51.062600+00:00",
   "expected": {
-    "notes": "Unlabeled captured case. Add teacher output or human labels before scoring quality."
+    "check_conclusion": "failure",
+    "findings": [
+      {
+        "file": "server/app/main.py",
+        "id": "final-recovery-unused",
+        "must_include": [
+          "recover_missing_final",
+          "events endpoint",
+          "retry"
+        ],
+        "severity": "P1",
+        "summary": "Removing recover_missing_final from the events endpoint leaves final-recovery retries without a normal caller."
+      },
+      {
+        "file": "server/app/narrator.py",
+        "id": "turnless-final-dropped",
+        "must_include": [
+          "turn_id",
+          "missing",
+          "final"
+        ],
+        "severity": "P1",
+        "summary": "Dropping provider finals when turn_id is missing can lose completions after restart because active_turn_id is in-memory."
+      }
+    ],
+    "notes": "Human-accepted useful findings from the prior review bot for the first PR commit."
   },
   "input": {
     "base_sha": "4625de4df421d9f87aed48bbec6e77f4c2783760",

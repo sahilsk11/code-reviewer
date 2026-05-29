@@ -49,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
         ),
         scores=[
             json_payload_present,
+            expected_conclusion_matches,
+            expected_finding_recall,
+            expected_file_recall,
             conclusion_matches_teacher,
             finding_count_close_to_teacher,
             teacher_file_overlap,
@@ -77,10 +80,10 @@ def load_cases() -> list[dict[str, Any]]:
         if path.name.endswith(".teacher.json"):
             continue
         data = json.loads(path.read_text(encoding="utf-8"))
-        teacher_path = path.with_suffix(".teacher.json")
         expected = data.get("expected") or {}
+        teacher_path = path.with_suffix(".teacher.json")
         if teacher_path.exists():
-            expected = json.loads(teacher_path.read_text(encoding="utf-8"))
+            expected = expected | json.loads(teacher_path.read_text(encoding="utf-8"))
         cases.append(
             {
                 "input": data["input"] | {"case_path": str(path)},
@@ -286,6 +289,45 @@ def json_payload_present(input: dict[str, Any], output: dict[str, Any], expected
     )
 
 
+def expected_conclusion_matches(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    wanted = expected.get("check_conclusion")
+    if not wanted:
+        return Score(name="expected_conclusion_matches", score=None, metadata={"reason": "missing labels"})
+    actual = (output.get("payload") or {}).get("check_conclusion")
+    return Score(
+        name="expected_conclusion_matches",
+        score=1.0 if actual == wanted else 0.0,
+        metadata={"actual": actual, "expected": wanted},
+    )
+
+
+def expected_finding_recall(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    labels = expected.get("findings")
+    if not isinstance(labels, list) or not labels:
+        return Score(name="expected_finding_recall", score=None, metadata={"reason": "missing labels"})
+    text = searchable_review_text(output)
+    found = [label["id"] for label in labels if all(term.lower() in text for term in label.get("must_include", []))]
+    return Score(
+        name="expected_finding_recall",
+        score=len(found) / len(labels),
+        metadata={"found": found, "missing": [label["id"] for label in labels if label["id"] not in found]},
+    )
+
+
+def expected_file_recall(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    labels = expected.get("findings")
+    if not isinstance(labels, list) or not labels:
+        return Score(name="expected_file_recall", score=None, metadata={"reason": "missing labels"})
+    student_files = finding_files(output.get("payload") or {})
+    expected_files = {str(label["file"]) for label in labels if label.get("file")}
+    overlap = expected_files & student_files
+    return Score(
+        name="expected_file_recall",
+        score=len(overlap) / len(expected_files),
+        metadata={"expected_files": sorted(expected_files), "student_files": sorted(student_files)},
+    )
+
+
 def conclusion_matches_teacher(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
     student = output.get("payload") or {}
     teacher = expected.get("teacher") or {}
@@ -375,6 +417,10 @@ def finding_files(payload: dict[str, Any]) -> set[str]:
     if not isinstance(findings, list):
         return set()
     return {str(item.get("file")) for item in findings if isinstance(item, dict) and item.get("file")}
+
+
+def searchable_review_text(output: dict[str, Any]) -> str:
+    return json.dumps(output.get("payload") or {}).lower() + "\n" + output.get("markdown", "").lower()
 
 
 def slug(value: str) -> str:
