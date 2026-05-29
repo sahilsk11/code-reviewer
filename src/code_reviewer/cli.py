@@ -3,15 +3,24 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import sys
-from importlib import resources
 from pathlib import Path
 from typing import Sequence
+from uuid import uuid4
 
-WORKFLOW_NAME = "ai-code-review"
-WORKFLOW_FILENAME = f"{WORKFLOW_NAME}.yaml"
+from code_reviewer.archon import ArchonClient, ArchonRun
+from code_reviewer.run_store import ReviewRun, RunStore
+from code_reviewer.workflow_builder import (
+    DEFAULT_HARNESS,
+    DEFAULT_MODEL,
+    WORKFLOW_FILENAME,
+    WORKFLOW_NAME,
+    WorkflowConfig,
+    render_workflow,
+    write_workflow,
+)
+
 BRAINTRUST_PROJECT = "My Project"
 SENSITIVE_ARG_NAMES = {
     "--api-key",
@@ -87,8 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     review = subparsers.add_parser("review", help="Run the bundled review workflow.")
     review.add_argument("--repo", default=".", help="Repository to review.")
-    review.add_argument("--event-path", help="Path to the GitHub event JSON.")
-    review.add_argument("--pr-url", help="Pull request URL for manual runs.")
+    review.add_argument("--pr-url", required=True, help="Pull request URL to review.")
     review.add_argument("--head-sha", help="Exact PR head SHA to review.")
     review.add_argument(
         "--mode",
@@ -97,9 +105,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Review mode requested by the operator.",
     )
     review.add_argument(
-        "--workflow",
-        default=WORKFLOW_NAME,
-        help="Archon workflow name to run.",
+        "--harness",
+        default=DEFAULT_HARNESS,
+        help="Archon provider/harness to render into the workflow.",
+    )
+    review.add_argument(
+        "--model",
+        default=DEFAULT_MODEL,
+        help="Model identifier to render into agent workflow nodes.",
     )
     review.add_argument(
         "--archon-bin",
@@ -107,15 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Archon executable to invoke.",
     )
     review.add_argument(
-        "--no-install",
-        action="store_true",
-        help="Do not install/update the bundled workflow before running.",
-    )
-    review.add_argument(
         "--dry-run",
         action="store_true",
         help="Run the review without publishing GitHub comments or checks.",
     )
+    review.add_argument("--db-path", help=argparse.SUPPRESS)
     review.set_defaults(func=cmd_review)
 
     control = subparsers.add_parser(
@@ -135,7 +144,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     path = subparsers.add_parser(
         "workflow-path",
-        help="Print the bundled workflow resource path.",
+        help="Explain where generated workflows are written.",
     )
     path.set_defaults(func=cmd_workflow_path)
 
@@ -153,30 +162,80 @@ def cmd_review(args: argparse.Namespace) -> int:
     if not repo.exists():
         raise SystemExit(f"Repository does not exist: {repo}")
 
-    if not args.no_install:
-        install_workflow(repo, force=True)
-
     payload = build_review_payload(
         repo=repo,
-        event_path=Path(args.event_path).resolve() if args.event_path else None,
         pr_url=args.pr_url,
         head_sha=args.head_sha,
         mode=args.mode,
         dry_run=args.dry_run,
     )
 
-    command = [
-        args.archon_bin,
-        "workflow",
-        "run",
-        args.workflow,
-        "--cwd",
-        str(repo),
-        json.dumps(payload, sort_keys=True),
-    ]
-    env = os.environ.copy()
-    env.setdefault("CODE_REVIEW_PYTHON", sys.executable)
-    return subprocess.run(command, check=False, env=env).returncode
+    repository = payload.get("repository")
+    pr_number = payload.get("pull_request_number")
+    head_sha = payload.get("head_sha")
+    if not isinstance(repository, str) or not isinstance(pr_number, int):
+        raise SystemExit("Need a GitHub pull request URL with repository and PR number")
+    if not isinstance(head_sha, str):
+        raise SystemExit("Need a resolved PR head SHA")
+
+    run_id = uuid4().hex
+    workflow_name = f"{WORKFLOW_NAME}-{run_id[:8]}"
+    workflow_path = repo / ".archon" / "workflows" / f"{workflow_name}.yaml"
+    workflow_config = WorkflowConfig(
+        name=workflow_name,
+        harness=args.harness,
+        model=args.model,
+    )
+    workflow_yaml = render_workflow(workflow_config)
+    write_workflow(workflow_path, workflow_config)
+
+    store = RunStore(Path(args.db_path).expanduser().resolve() if args.db_path else None)
+    archon = ArchonClient(args.archon_bin)
+    cancel_active_runs(
+        store=store,
+        archon=archon,
+        repository=repository,
+        pr_number=pr_number,
+        replacement_run_id=run_id,
+        current_repo=repo,
+    )
+    run = store.create_run(
+        run_id=run_id,
+        repository=repository,
+        pr_number=pr_number,
+        head_sha=head_sha,
+        mode=args.mode,
+        harness=args.harness,
+        model=args.model,
+        repo_path=repo,
+        workflow_name=workflow_name,
+        workflow_path=workflow_path,
+        workflow_yaml=workflow_yaml,
+    )
+
+    try:
+        result = archon.run_workflow(
+            workflow_name=run.workflow_name,
+            cwd=repo,
+            payload=payload,
+        )
+    except Exception:
+        store.mark_failed(run.id, exit_code=1)
+        raise
+
+    store.set_archon_run_id(run.id, result.archon_run_id)
+    if result.returncode == 0:
+        store.mark_succeeded(run.id, exit_code=result.returncode)
+    else:
+        ensure_archon_terminal(archon=archon, run=store.get_run(run.id), cwd=repo)
+        store.mark_failed(run.id, exit_code=result.returncode)
+    return result.returncode
+
+
+def ensure_archon_terminal(*, archon: ArchonClient, run: ReviewRun, cwd: Path) -> None:
+    archon_run = find_archon_run(archon, run, cwd=cwd)
+    if archon_run is not None:
+        archon.abandon_and_verify(archon_run.id, cwd=cwd)
 
 
 def cmd_control(args: argparse.Namespace) -> int:
@@ -193,8 +252,7 @@ def cmd_control(args: argparse.Namespace) -> int:
 
 
 def cmd_workflow_path(_: argparse.Namespace) -> int:
-    with resources.as_file(workflow_resource()) as path:
-        print(path)
+    print(f"Generated workflows are written to .archon/workflows/{WORKFLOW_FILENAME}")
     return 0
 
 
@@ -206,84 +264,42 @@ def install_workflow(repo: Path, *, force: bool = False) -> Path:
         )
 
     destination.parent.mkdir(parents=True, exist_ok=True)
-    with resources.as_file(workflow_resource()) as source:
-        shutil.copyfile(source, destination)
+    write_workflow(destination, WorkflowConfig())
     return destination
-
-
-def workflow_resource() -> resources.abc.Traversable:
-    return resources.files("code_reviewer").joinpath("workflows", WORKFLOW_FILENAME)
 
 
 def build_review_payload(
     *,
     repo: Path,
-    event_path: Path | None,
-    pr_url: str | None,
+    pr_url: str,
     head_sha: str | None,
     mode: str,
     dry_run: bool = False,
 ) -> dict[str, object]:
-    event = read_event(event_path) if event_path else {}
-    pull_request = event.get("pull_request") if isinstance(event, dict) else None
-    pr_url = pr_url or extract_pr_url(pull_request)
-    head_sha = head_sha or extract_head_sha(pull_request) or resolve_head_sha(pr_url)
+    pr = resolve_pr(pr_url) if not head_sha else {}
+    head_sha = head_sha or (
+        pr.get("headRefOid") if isinstance(pr.get("headRefOid"), str) else None
+    )
     if not head_sha:
-        raise SystemExit("Need --head-sha, a pull_request event payload, or --pr-url")
+        raise SystemExit("Need --head-sha or a PR URL that GitHub CLI can resolve")
+    parsed_repository, parsed_pr_number = parse_pr_url(pr_url)
+    if not parsed_repository or parsed_pr_number is None:
+        raise SystemExit(f"Pull request URL is not a GitHub PR URL: {pr_url}")
 
     return {
         "repo": str(repo),
-        "event_path": str(event_path) if event_path else None,
-        "event_name": event.get("action") if isinstance(event, dict) else None,
         "head_sha": head_sha,
         "mode": mode,
         "dry_run": dry_run,
         "pull_request_url": pr_url,
-        "pull_request_number": pull_request.get("number")
-        if isinstance(pull_request, dict)
-        else None,
-        "repository": event.get("repository", {}).get("full_name")
-        if isinstance(event, dict)
-        else None,
+        "pull_request_number": parsed_pr_number,
+        "repository": parsed_repository,
     }
 
 
-def read_event(event_path: Path | None) -> dict[str, object]:
-    if event_path is None:
-        return {}
-    try:
-        with event_path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except FileNotFoundError as exc:
-        raise SystemExit(f"GitHub event file does not exist: {event_path}") from exc
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"GitHub event file is not valid JSON: {event_path}") from exc
-
-    if not isinstance(data, dict):
-        raise SystemExit(f"GitHub event JSON must be an object: {event_path}")
-    return data
-
-
-def extract_pr_url(pull_request: object) -> str | None:
-    if not isinstance(pull_request, dict):
-        return None
-    url = pull_request.get("html_url")
-    return url if isinstance(url, str) else None
-
-
-def extract_head_sha(pull_request: object) -> str | None:
-    if not isinstance(pull_request, dict):
-        return None
-    head = pull_request.get("head")
-    if not isinstance(head, dict):
-        return None
-    sha = head.get("sha")
-    return sha if isinstance(sha, str) else None
-
-
-def resolve_head_sha(pr_url: str | None) -> str | None:
+def resolve_pr(pr_url: str | None) -> dict[str, object]:
     if not pr_url:
-        return None
+        return {}
     try:
         result = subprocess.run(
             ["gh", "pr", "view", pr_url, "--json", "headRefOid"],
@@ -296,8 +312,55 @@ def resolve_head_sha(pr_url: str | None) -> str | None:
         raise SystemExit(f"Could not resolve PR head SHA from {pr_url}: {exc}") from exc
 
     data = json.loads(result.stdout)
-    sha = data.get("headRefOid") if isinstance(data, dict) else None
-    return sha if isinstance(sha, str) else None
+    return data if isinstance(data, dict) else {}
+
+
+def parse_pr_url(value: str | None) -> tuple[str | None, int | None]:
+    if not value:
+        return None, None
+    import re
+
+    match = re.search(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)", value)
+    if not match:
+        return None, None
+    return match.group(1), int(match.group(2))
+
+
+def cancel_active_runs(
+    *,
+    store: RunStore,
+    archon: ArchonClient,
+    repository: str,
+    pr_number: int,
+    replacement_run_id: str,
+    current_repo: Path,
+) -> None:
+    for run in store.active_runs_for_pr(repository=repository, pr_number=pr_number):
+        store.mark_canceling(run.id)
+        run_repo = Path(run.repo_path)
+        if not run_repo.exists():
+            store.mark_canceled(run.id, superseded_by=replacement_run_id)
+            continue
+
+        status_cwd = run_repo
+        archon_run = find_archon_run(archon, run, cwd=status_cwd)
+        if archon_run is None and run_repo != current_repo:
+            status_cwd = current_repo
+            archon_run = find_archon_run(archon, run, cwd=status_cwd)
+        if archon_run is not None:
+            archon.abandon_and_verify(archon_run.id, cwd=status_cwd)
+        store.mark_canceled(run.id, superseded_by=replacement_run_id)
+
+
+def find_archon_run(archon: ArchonClient, run: ReviewRun, *, cwd: Path) -> ArchonRun | None:
+    active = archon.active_runs(cwd=cwd)
+
+    for archon_run in active:
+        if run.archon_run_id and archon_run.id == run.archon_run_id:
+            return archon_run
+        if archon_run.workflow_name == run.workflow_name:
+            return archon_run
+    return None
 
 
 if __name__ == "__main__":
