@@ -21,7 +21,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Braintrust eval for frozen real PR review cases.")
     parser.add_argument("--model", default="gpt-5.3-codex-spark")
     parser.add_argument("--teacher-model", default="gpt-5.5")
+    parser.add_argument("--judge-model", default="gpt-5.5")
     parser.add_argument("--refresh-teacher", action="store_true")
+    parser.add_argument("--judge", action="store_true")
     parser.add_argument("--timeout", type=int, default=240)
     args = parser.parse_args(argv)
 
@@ -39,18 +41,29 @@ def main(argv: list[str] | None = None) -> int:
         PROJECT_NAME,
         experiment_name=f"real-pr-review-v0-{slug(args.model)}",
         data=cases,
-        task=lambda input: review_case(input, model=args.model, timeout=args.timeout),
+        task=lambda input: review_case(
+            input,
+            model=args.model,
+            judge_model=args.judge_model if args.judge else None,
+            timeout=args.timeout,
+        ),
         scores=[
             json_payload_present,
             conclusion_matches_teacher,
             finding_count_close_to_teacher,
             teacher_file_overlap,
             avoids_extra_findings,
+            judge_groundedness,
+            judge_actionability,
+            judge_risk_relevance,
+            judge_noise,
+            judge_overall_usefulness,
         ],
         metadata={
             "runner": "evals/real_pr_review_v0.py",
             "model": args.model,
             "teacher_model": args.teacher_model,
+            "judge_model": args.judge_model if args.judge else None,
         },
         max_concurrency=1,
     )
@@ -61,6 +74,8 @@ def main(argv: list[str] | None = None) -> int:
 def load_cases() -> list[dict[str, Any]]:
     cases = []
     for path in sorted(CASE_DIR.glob("*.json")):
+        if path.name.endswith(".teacher.json"):
+            continue
         data = json.loads(path.read_text(encoding="utf-8"))
         teacher_path = path.with_suffix(".teacher.json")
         expected = data.get("expected") or {}
@@ -93,7 +108,13 @@ def save_teacher(case: dict[str, Any], *, teacher_model: str) -> None:
     print(f"wrote {teacher_path} ({teacher_model})")
 
 
-def review_case(input: dict[str, Any], *, model: str, timeout: int) -> dict[str, Any]:
+def review_case(
+    input: dict[str, Any],
+    *,
+    model: str,
+    judge_model: str | None = None,
+    timeout: int,
+) -> dict[str, Any]:
     prompt = f"""Review this frozen pull request diff.
 Return only high-confidence correctness findings.
 Ignore style-only feedback and generic test requests.
@@ -154,12 +175,96 @@ Diff:
             check=False,
         )
         markdown = Path(output_file.name).read_text(encoding="utf-8").strip()
-    return {
+    result = {
         "returncode": completed.returncode,
         "stderr_tail": completed.stderr[-2000:],
         "markdown": markdown,
         "payload": extract_json_payload(markdown),
     }
+    if judge_model:
+        result["judge"] = judge_review(input, review=result, model=judge_model, timeout=timeout)
+    return result
+
+
+def judge_review(
+    input: dict[str, Any],
+    *,
+    review: dict[str, Any],
+    model: str,
+    timeout: int,
+) -> dict[str, Any] | None:
+    prompt = f"""You are judging an AI code review for usefulness.
+Given the PR diff and the review output, grade whether the review is useful.
+
+Focus on:
+- groundedness: comments are supported by the diff
+- actionability: comments tell the author what to fix or investigate
+- risk_relevance: comments identify correctness/regression risk, not style noise
+- noise: low is good; high means distracting or generic comments
+- overall_usefulness: whether this review would help a busy maintainer
+
+Return exactly one fenced json block:
+{{
+  "groundedness": 0.0,
+  "actionability": 0.0,
+  "risk_relevance": 0.0,
+  "noise": 0.0,
+  "overall_usefulness": 0.0,
+  "rationale": "one short paragraph"
+}}
+
+Use numbers between 0 and 1. For noise, 0 means no noise and 1 means very noisy.
+
+PR title: {input["title"]}
+
+PR body:
+{input["body"]}
+
+Diff:
+```diff
+{input["diff"]}
+```
+
+Review output:
+```json
+{json.dumps(review.get("payload") or review.get("markdown"), indent=2)}
+```
+"""
+    with tempfile.NamedTemporaryFile(prefix="real-pr-judge-v0-", suffix=".md") as output_file:
+        command = [
+            "codex",
+            "exec",
+            "--ephemeral",
+            "--skip-git-repo-check",
+            "--sandbox",
+            "read-only",
+            "--color",
+            "never",
+            "--output-last-message",
+            output_file.name,
+            "--model",
+            model,
+            "-",
+        ]
+        completed = subprocess.run(
+            command,
+            input=prompt,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout,
+            check=False,
+        )
+        markdown = Path(output_file.name).read_text(encoding="utf-8").strip()
+    payload = extract_json_payload(markdown)
+    if payload is None:
+        return {
+            "returncode": completed.returncode,
+            "markdown": markdown,
+            "error": "missing judge json",
+        }
+    payload["returncode"] = completed.returncode
+    return payload
 
 
 def extract_json_payload(text: str) -> dict[str, Any] | None:
@@ -224,6 +329,44 @@ def avoids_extra_findings(input: dict[str, Any], output: dict[str, Any], expecte
         name="avoids_extra_findings",
         score=1.0 if student_count <= allowed else 0.0,
         metadata={"student_count": student_count, "allowed": allowed},
+    )
+
+
+def judge_groundedness(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    return judge_score("judge_groundedness", output, "groundedness")
+
+
+def judge_actionability(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    return judge_score("judge_actionability", output, "actionability")
+
+
+def judge_risk_relevance(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    return judge_score("judge_risk_relevance", output, "risk_relevance")
+
+
+def judge_noise(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    judge = output.get("judge")
+    if not isinstance(judge, dict) or not isinstance(judge.get("noise"), int | float):
+        return Score(name="judge_noise", score=None, metadata={"reason": "missing judge"})
+    return Score(
+        name="judge_noise",
+        score=1.0 - float(judge["noise"]),
+        metadata={"raw_noise": judge["noise"], "rationale": judge.get("rationale")},
+    )
+
+
+def judge_overall_usefulness(input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]) -> Score:
+    return judge_score("judge_overall_usefulness", output, "overall_usefulness")
+
+
+def judge_score(name: str, output: dict[str, Any], key: str) -> Score:
+    judge = output.get("judge")
+    if not isinstance(judge, dict) or not isinstance(judge.get(key), int | float):
+        return Score(name=name, score=None, metadata={"reason": "missing judge"})
+    return Score(
+        name=name,
+        score=float(judge[key]),
+        metadata={"rationale": judge.get("rationale")},
     )
 
 
