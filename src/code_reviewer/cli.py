@@ -10,6 +10,7 @@ from typing import Sequence
 from uuid import uuid4
 
 from code_reviewer.archon import ArchonClient, ArchonRun
+from code_reviewer.github_app_manifest import build_manifest, render_manifest
 from code_reviewer.run_store import ReviewRun, RunStore
 from code_reviewer.workflow_builder import (
     DEFAULT_HARNESS,
@@ -127,6 +128,32 @@ def build_parser() -> argparse.ArgumentParser:
     review.add_argument("--db-path", help=argparse.SUPPRESS)
     review.set_defaults(func=cmd_review)
 
+    github_app = subparsers.add_parser(
+        "github-app",
+        help="Generate GitHub App setup resources.",
+    )
+    github_app_subparsers = github_app.add_subparsers(
+        dest="github_app_command",
+        required=True,
+    )
+    manifest = github_app_subparsers.add_parser(
+        "manifest",
+        help="Print the GitHub App manifest JSON.",
+    )
+    manifest.add_argument("--name", help="GitHub App name.")
+    manifest.add_argument("--url", help="Public app or operator documentation URL.")
+    manifest.add_argument("--webhook-url", help="SAS GitHub App webhook receiver URL.")
+    manifest.add_argument("--redirect-url", help="Manifest flow redirect URL.")
+    manifest.add_argument(
+        "--callback-url",
+        action="append",
+        default=None,
+        help="OAuth callback URL. Can be passed more than once.",
+    )
+    manifest.add_argument("--setup-url", help="Optional post-install setup URL.")
+    manifest.add_argument("--output", help="Write manifest JSON to this path.")
+    manifest.set_defaults(func=cmd_github_app_manifest)
+
     control = subparsers.add_parser(
         "control",
         help="Emit reviewer control tokens for PR comments or logs.",
@@ -230,6 +257,26 @@ def cmd_review(args: argparse.Namespace) -> int:
         ensure_archon_terminal(archon=archon, run=store.get_run(run.id), cwd=repo)
         store.mark_failed(run.id, exit_code=result.returncode)
     return result.returncode
+
+
+def cmd_github_app_manifest(args: argparse.Namespace) -> int:
+    manifest = build_manifest(
+        name=args.name,
+        url=args.url,
+        webhook_url=args.webhook_url,
+        redirect_url=args.redirect_url,
+        callback_urls=args.callback_url,
+        setup_url=args.setup_url,
+    )
+    manifest_json = render_manifest(manifest)
+    if args.output:
+        output_path = Path(args.output).expanduser()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(manifest_json, encoding="utf-8")
+        print(output_path)
+    else:
+        print(manifest_json, end="")
+    return 0
 
 
 def ensure_archon_terminal(*, archon: ArchonClient, run: ReviewRun, cwd: Path) -> None:
