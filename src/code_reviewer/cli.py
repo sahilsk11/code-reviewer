@@ -96,8 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     review = subparsers.add_parser("review", help="Run the bundled review workflow.")
     review.add_argument("--repo", default=".", help="Repository to review.")
-    review.add_argument("--event-path", help="Path to the GitHub event JSON.")
-    review.add_argument("--pr-url", help="Pull request URL for manual runs.")
+    review.add_argument("--pr-url", required=True, help="Pull request URL to review.")
     review.add_argument("--head-sha", help="Exact PR head SHA to review.")
     review.add_argument(
         "--mode",
@@ -170,7 +169,6 @@ def cmd_review(args: argparse.Namespace) -> int:
 
     payload = build_review_payload(
         repo=repo,
-        event_path=Path(args.event_path).resolve() if args.event_path else None,
         pr_url=args.pr_url,
         head_sha=args.head_sha,
         mode=args.mode,
@@ -181,7 +179,7 @@ def cmd_review(args: argparse.Namespace) -> int:
     pr_number = payload.get("pull_request_number")
     head_sha = payload.get("head_sha")
     if not isinstance(repository, str) or not isinstance(pr_number, int):
-        raise SystemExit("Need a PR URL or pull_request event payload with repository and PR number")
+        raise SystemExit("Need a GitHub pull request URL with repository and PR number")
     if not isinstance(head_sha, str):
         raise SystemExit("Need a resolved PR head SHA")
 
@@ -271,77 +269,30 @@ def install_workflow(repo: Path, *, force: bool = False) -> Path:
 def build_review_payload(
     *,
     repo: Path,
-    event_path: Path | None,
-    pr_url: str | None,
+    pr_url: str,
     head_sha: str | None,
     mode: str,
     dry_run: bool = False,
 ) -> dict[str, object]:
-    event = read_event(event_path) if event_path else {}
-    pull_request = event.get("pull_request") if isinstance(event, dict) else None
-    pr_url = pr_url or extract_pr_url(pull_request)
-    event_head_sha = extract_head_sha(pull_request)
-    pr = resolve_pr(pr_url) if pr_url and not (head_sha or event_head_sha) else {}
-    head_sha = (
-        head_sha
-        or event_head_sha
-        or (pr.get("headRefOid") if isinstance(pr.get("headRefOid"), str) else None)
+    pr = resolve_pr(pr_url) if not head_sha else {}
+    head_sha = head_sha or (
+        pr.get("headRefOid") if isinstance(pr.get("headRefOid"), str) else None
     )
     if not head_sha:
-        raise SystemExit("Need --head-sha, a pull_request event payload, or --pr-url")
+        raise SystemExit("Need --head-sha or a PR URL that GitHub CLI can resolve")
     parsed_repository, parsed_pr_number = parse_pr_url(pr_url)
+    if not parsed_repository or parsed_pr_number is None:
+        raise SystemExit(f"Pull request URL is not a GitHub PR URL: {pr_url}")
 
     return {
         "repo": str(repo),
-        "event_path": str(event_path) if event_path else None,
-        "event_name": event.get("action") if isinstance(event, dict) else None,
         "head_sha": head_sha,
         "mode": mode,
         "dry_run": dry_run,
         "pull_request_url": pr_url,
-        "pull_request_number": pull_request.get("number")
-        if isinstance(pull_request, dict)
-        else parsed_pr_number,
-        "repository": (
-            event.get("repository", {}).get("full_name")
-            if isinstance(event.get("repository"), dict)
-            else None
-        )
-        or parsed_repository,
+        "pull_request_number": parsed_pr_number,
+        "repository": parsed_repository,
     }
-
-
-def read_event(event_path: Path | None) -> dict[str, object]:
-    if event_path is None:
-        return {}
-    try:
-        with event_path.open("r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    except FileNotFoundError as exc:
-        raise SystemExit(f"GitHub event file does not exist: {event_path}") from exc
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"GitHub event file is not valid JSON: {event_path}") from exc
-
-    if not isinstance(data, dict):
-        raise SystemExit(f"GitHub event JSON must be an object: {event_path}")
-    return data
-
-
-def extract_pr_url(pull_request: object) -> str | None:
-    if not isinstance(pull_request, dict):
-        return None
-    url = pull_request.get("html_url")
-    return url if isinstance(url, str) else None
-
-
-def extract_head_sha(pull_request: object) -> str | None:
-    if not isinstance(pull_request, dict):
-        return None
-    head = pull_request.get("head")
-    if not isinstance(head, dict):
-        return None
-    sha = head.get("sha")
-    return sha if isinstance(sha, str) else None
 
 
 def resolve_pr(pr_url: str | None) -> dict[str, object]:

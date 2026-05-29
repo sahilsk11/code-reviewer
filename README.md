@@ -29,12 +29,12 @@ Install the bundled workflow into the current repo:
 code-review install-workflow
 ```
 
-Run a review from a GitHub Actions pull request event:
+Run a review from GitHub Actions:
 
 ```sh
 code-review review \
   --repo . \
-  --event-path "$GITHUB_EVENT_PATH" \
+  --pr-url "$PR_URL" \
   --head-sha "$PR_HEAD_SHA"
 ```
 
@@ -46,7 +46,8 @@ code-review review \
 ```
 
 The PR URL is enough for manual runs when GitHub CLI can resolve the head SHA.
-`--repo` defaults to the current directory.
+Actions should still pass `--head-sha` to pin the review to the checked-out
+commit. `--repo` defaults to the current directory.
 
 Run without publishing comments or checks:
 

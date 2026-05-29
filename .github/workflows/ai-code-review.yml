@@ -56,10 +56,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           code-review review \
             --repo . \
-            --event-path "$GITHUB_EVENT_PATH" \
+            --pr-url "$PR_URL" \
             --head-sha "$PR_HEAD_SHA" \
             --mode incremental
 

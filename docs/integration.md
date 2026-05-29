@@ -18,10 +18,11 @@ The bundled Archon workflow grants Codex access to `/home/code-reviewer/wt` for
 prepared review worktrees and `/home/code-reviewer/.kanna` for runner-user
 transcripts.
 
-The workflow checks out `github.event.pull_request.head.sha` and passes that SHA
-to `code-review review`. The reviewer must use that exact SHA for all review and
-publishing decisions. The CLI builds a run-specific Archon workflow before each
-invocation and stores run state in `~/.code-reviews/runs.db`.
+The workflow checks out `github.event.pull_request.head.sha`, passes the PR URL,
+and passes that exact SHA to `code-review review`. The reviewer must use that
+SHA for all review and publishing decisions. The CLI builds a run-specific
+Archon workflow before each invocation and stores run state in
+`~/.code-reviews/runs.db`.
 
 For manual runs, a PR URL is sufficient when GitHub CLI can resolve the PR:
 
@@ -32,9 +33,7 @@ code-review review --pr-url https://github.com/owner/repo/pull/123
 Useful runner flags:
 
 - `--repo`: repository checkout to review. Defaults to the current directory.
-- `--event-path`: GitHub Actions event JSON. Optional outside Actions.
-- `--pr-url`: pull request URL. Required for manual runs unless the event file
-  provides PR metadata.
+- `--pr-url`: pull request URL. Required.
 - `--head-sha`: exact PR head SHA. Actions should pass this explicitly.
 - `--mode`: review mode metadata, currently `incremental` or `full`.
 - `--harness`: Archon provider/harness rendered into the generated workflow.

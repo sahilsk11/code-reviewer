@@ -17,32 +17,14 @@ def test_install_workflow(tmp_path: Path) -> None:
     assert (tmp_path / ".archon" / "workflows" / "ai-code-review.yaml").exists()
 
 
-def test_build_review_payload_from_event(tmp_path: Path) -> None:
-    event_path = tmp_path / "event.json"
-    event_path.write_text(
-        json.dumps(
-            {
-                "action": "synchronize",
-                "repository": {"full_name": "owner/repo"},
-                "pull_request": {
-                    "number": 42,
-                    "html_url": "https://github.com/owner/repo/pull/42",
-                    "head": {"sha": "event-sha"},
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
+def test_build_review_payload_from_pr_url_and_head_sha(tmp_path: Path) -> None:
     payload = build_review_payload(
         repo=tmp_path,
-        event_path=event_path,
-        pr_url=None,
-        head_sha=None,
+        pr_url="https://github.com/owner/repo/pull/42",
+        head_sha="event-sha",
         mode="incremental",
     )
 
-    assert payload["event_name"] == "synchronize"
     assert payload["head_sha"] == "event-sha"
     assert payload["pull_request_number"] == 42
     assert payload["pull_request_url"] == "https://github.com/owner/repo/pull/42"
@@ -56,7 +38,6 @@ def test_build_review_payload_resolves_head_sha_from_pr_url(tmp_path: Path) -> N
     with patch("code_reviewer.cli.subprocess.run", return_value=completed):
         payload = build_review_payload(
             repo=tmp_path,
-            event_path=None,
             pr_url="https://github.com/owner/repo/pull/42",
             head_sha=None,
             mode="full",
@@ -70,21 +51,6 @@ def test_build_review_payload_resolves_head_sha_from_pr_url(tmp_path: Path) -> N
 
 
 def test_review_generates_workflow_tracks_run_and_invokes_archon(tmp_path: Path) -> None:
-    event_path = tmp_path / "event.json"
-    event_path.write_text(
-        json.dumps(
-            {
-                "action": "opened",
-                "repository": {"full_name": "owner/repo"},
-                "pull_request": {
-                    "number": 7,
-                    "html_url": "https://github.com/owner/repo/pull/7",
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
     fake_archon = Mock()
     fake_archon.run_workflow.return_value = ArchonResult(
         returncode=0,
@@ -99,8 +65,8 @@ def test_review_generates_workflow_tracks_run_and_invokes_archon(tmp_path: Path)
                 "review",
                 "--repo",
                 str(tmp_path),
-                "--event-path",
-                str(event_path),
+                "--pr-url",
+                "https://github.com/owner/repo/pull/7",
                 "--head-sha",
                 "abc123",
                 "--archon-bin",
@@ -152,21 +118,6 @@ def test_review_abandons_existing_active_archon_run_for_same_pr(tmp_path: Path) 
     )
     store.set_archon_run_id(old.id, "archon-old")
 
-    event_path = tmp_path / "event.json"
-    event_path.write_text(
-        json.dumps(
-            {
-                "action": "synchronize",
-                "repository": {"full_name": "owner/repo"},
-                "pull_request": {
-                    "number": 7,
-                    "html_url": "https://github.com/owner/repo/pull/7",
-                    "head": {"sha": "newsha"},
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
     fake_archon = Mock()
     fake_archon.active_runs.return_value = [
         ArchonRun(
@@ -188,8 +139,10 @@ def test_review_abandons_existing_active_archon_run_for_same_pr(tmp_path: Path) 
                 "review",
                 "--repo",
                 str(tmp_path),
-                "--event-path",
-                str(event_path),
+                "--pr-url",
+                "https://github.com/owner/repo/pull/7",
+                "--head-sha",
+                "newsha",
                 "--db-path",
                 str(db_path),
             ]
