@@ -3,8 +3,12 @@
 1. Copy `.github/workflows/ai-code-review.yml` into the target repository.
 2. Update the `Install Archon` step to use the organization's pinned Archon install source.
 3. Update the `Install code-reviewer` step to use a pinned tag or internal package source.
-4. Merge the workflow.
-5. In branch protection, require the `AI Code Review` check.
+4. Add an `OPENCODE_API_KEY` repository or organization secret for review runs.
+5. Merge the workflow.
+6. In branch protection, require the `AI Code Review` check.
+
+The workflow writes the OpenCode API key into
+`~/.local/share/opencode/auth.json` before running Archon.
 
 The workflow checks out `github.event.pull_request.head.sha` and passes that SHA
 to `code-review review`. The reviewer must use that exact SHA for all review and
@@ -25,7 +29,8 @@ code-review control resolve --finding-id finding-123
 ```
 
 The bundled Archon workflow is responsible for reading these controls and
-applying them before publishing new comments or setting the final check result.
+applying them before publishing new comments. The GitHub Actions job owns the
+final check result through the reviewer process exit code.
 
 ## Dry Runs
 
@@ -41,7 +46,7 @@ code-review review \
 ```
 
 In dry-run mode, the publish node renders the summary comment, inline comments,
-and check conclusion it would have sent to GitHub.
+and blocking conclusion it would have sent to GitHub.
 
 ## Transcript Context
 

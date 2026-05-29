@@ -8,9 +8,8 @@ description: |
   conclusion, and cleaned-up temporary worktree.
   NOT for: Ad hoc local linting, broad product planning, or non-PR review.
 
-provider: codex
-model: gpt-5.5
-modelReasoningEffort: high
+provider: opencode
+model: opencode-go/deepseek-v4-flash
 worktree:
   enabled: false
 
@@ -25,8 +24,12 @@ nodes:
 
   - id: find_implementation_transcript
     context: fresh
-    model: gpt-5.5
-    effort: medium
+    model: opencode-go/deepseek-v4-flash
+    idle_timeout: 600000
+    retry:
+      max_attempts: 1
+      delay_ms: 10000
+      on_error: all
     prompt: |
       Identify the canonical implementation transcript for this pull request, if one exists.
 
@@ -60,8 +63,12 @@ nodes:
 
   - id: summarize_intent
     context: fresh
-    model: gpt-5.5
-    effort: high
+    model: opencode-go/deepseek-v4-flash
+    idle_timeout: 600000
+    retry:
+      max_attempts: 1
+      delay_ms: 10000
+      on_error: all
     prompt: |
       Create the shared intent and context brief for this pull request.
 
@@ -118,8 +125,12 @@ nodes:
 
   - id: reviewer_correctness_regressions
     context: fresh
-    model: gpt-5.5
-    effort: high
+    model: opencode-go/deepseek-v4-flash
+    idle_timeout: 600000
+    retry:
+      max_attempts: 1
+      delay_ms: 10000
+      on_error: all
     prompt: |
       Review this PR for correctness and regressions.
 
@@ -159,8 +170,12 @@ nodes:
 
   - id: reviewer_design_layering_reuse
     context: fresh
-    model: gpt-5.5
-    effort: high
+    model: opencode-go/deepseek-v4-flash
+    idle_timeout: 600000
+    retry:
+      max_attempts: 1
+      delay_ms: 10000
+      on_error: all
     prompt: |
       Review this PR for design, layering, abstraction boundaries, and reuse.
 
@@ -202,8 +217,12 @@ nodes:
 
   - id: reviewer_simplicity_alternatives
     context: fresh
-    model: gpt-5.5
-    effort: medium
+    model: opencode-go/deepseek-v4-flash
+    idle_timeout: 600000
+    retry:
+      max_attempts: 1
+      delay_ms: 10000
+      on_error: all
     prompt: |
       Review this PR for simplicity, directness, and better alternatives.
 
@@ -243,8 +262,12 @@ nodes:
 
   - id: aggregate_dedupe
     context: fresh
-    model: gpt-5.5
-    effort: high
+    model: opencode-go/deepseek-v4-flash
+    idle_timeout: 600000
+    retry:
+      max_attempts: 1
+      delay_ms: 10000
+      on_error: all
     prompt: |
       Aggregate the multi-agent review into the final publishable result.
 
@@ -298,13 +321,32 @@ nodes:
       - Produce readable Markdown with summary, final findings, skipped findings,
         active prior blockers carried forward, stale-comment actions, and check
         conclusion.
-      - End with one fenced `json` block named `publish_payload` containing the
-        final publishable structure for the publish node. This object must include
-        `blocking_count`, `non_blocking_count`, `check_conclusion` (`success` or
-        `failure`), and `findings` with stable ids and `blocking` booleans.
-        Findings should include `source` (`new_finding` or
-        `prior_active_comment`), `post_inline` boolean, and `prior_comment_url`
-        when carrying forward an existing comment.
+      - End with exactly one fenced `json` block. The JSON object itself must be
+        the publish payload. Do not wrap it in `publish_payload`, `payload`,
+        `result`, or any other outer key.
+      - The JSON object must include `blocking_count`, `non_blocking_count`,
+        `check_conclusion` (`success` or `failure`), and `findings` with stable
+        ids and `blocking` booleans. Findings should include `source`
+        (`new_finding` or `prior_active_comment`), `post_inline` boolean, and
+        `prior_comment_url` when carrying forward an existing comment.
+      - Use this exact top-level shape:
+
+        ```json
+        {
+          "blocking_count": 1,
+          "non_blocking_count": 2,
+          "check_conclusion": "failure",
+          "findings": [
+            {
+              "id": "example-finding-id",
+              "blocking": true,
+              "source": "new_finding",
+              "post_inline": true,
+              "prior_comment_url": null
+            }
+          ]
+        }
+        ```
     depends_on:
       - reviewer_correctness_regressions
       - reviewer_design_layering_reuse
@@ -312,8 +354,12 @@ nodes:
 
   - id: publish_review
     context: fresh
-    model: gpt-5.5
-    effort: high
+    model: opencode-go/deepseek-v4-flash
+    idle_timeout: 600000
+    retry:
+      max_attempts: 1
+      delay_ms: 10000
+      on_error: all
     prompt: |
       Publish the final AI Code Review result to GitHub.
 
@@ -373,4 +419,5 @@ nodes:
       "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.finalize_review \
         --aggregate-output-file "$aggregate_output_file" \
         --worktree-manifest "$prepare_worktree.output"
-    depends_on: [publish_review]
+    depends_on: [aggregate_dedupe, publish_review]
+    trigger_rule: all_done

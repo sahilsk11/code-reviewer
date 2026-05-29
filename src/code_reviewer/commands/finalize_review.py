@@ -37,9 +37,22 @@ def main(argv: list[str] | None = None) -> int:
     if cleanup_status != 0:
         return cleanup_status
 
+    validation_error = validate_publish_payload(payload)
+    if validation_error:
+        print(
+            json.dumps(
+                {
+                    "check_conclusion": "failure",
+                    "blocking_count": 0,
+                    "reason": validation_error,
+                },
+                sort_keys=True,
+            )
+        )
+        return 1
+
     blocking_count = count_blocking_findings(payload)
-    conclusion = str(payload.get("check_conclusion") or "").lower()
-    if conclusion == "failure" or blocking_count > 0:
+    if blocking_count > 0:
         print(
             json.dumps(
                 {
@@ -57,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "check_conclusion": "success",
                 "blocking_count": blocking_count,
-                "reason": conclusion or "no_blocking_findings",
+                "reason": "no_blocking_findings",
             },
             sort_keys=True,
         )
@@ -79,6 +92,21 @@ def extract_publish_payload(text: str) -> dict[str, Any]:
             return data
 
     raise SystemExit("aggregate_dedupe publish_payload JSON could not be parsed")
+
+
+def validate_publish_payload(payload: dict[str, Any]) -> str | None:
+    if isinstance(payload.get("publish_payload"), dict):
+        return "invalid_publish_payload_wrapped"
+
+    required = ("blocking_count", "non_blocking_count", "check_conclusion", "findings")
+    missing = [key for key in required if key not in payload]
+    if missing:
+        return f"invalid_publish_payload_missing_{'_'.join(missing)}"
+
+    if not isinstance(payload.get("findings"), list):
+        return "invalid_publish_payload_findings_not_list"
+
+    return None
 
 
 def count_blocking_findings(payload: dict[str, Any]) -> int:
