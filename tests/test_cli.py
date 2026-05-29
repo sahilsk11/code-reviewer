@@ -279,6 +279,37 @@ def test_control_outputs_stable_token(capsys) -> None:
     assert '"finding_id": "finding-1"' in output
 
 
+def test_github_app_manifest_prints_json(capsys) -> None:
+    result = main(
+        [
+            "github-app",
+            "manifest",
+            "--name",
+            "Example Reviewer",
+            "--webhook-url",
+            "https://sas.example.test/github-code-review-app",
+        ]
+    )
+
+    assert result == 0
+    manifest = json.loads(capsys.readouterr().out)
+    assert manifest["name"] == "Example Reviewer"
+    assert manifest["hook_attributes"]["url"] == (
+        "https://sas.example.test/github-code-review-app"
+    )
+    assert manifest["default_events"] == ["pull_request"]
+
+
+def test_github_app_manifest_writes_output_path(tmp_path: Path, capsys) -> None:
+    output_path = tmp_path / "github-app.json"
+
+    result = main(["github-app", "manifest", "--output", str(output_path)])
+
+    assert result == 0
+    assert capsys.readouterr().out.strip() == str(output_path)
+    assert json.loads(output_path.read_text(encoding="utf-8"))["name"] == "AI Code Reviewer"
+
+
 def test_sanitize_argv_redacts_secret_like_values() -> None:
     assert sanitize_argv(["control", "ignore", "--reason", "token-123"]) == [
         "control",

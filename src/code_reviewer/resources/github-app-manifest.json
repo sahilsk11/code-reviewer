@@ -1,0 +1,20 @@
+{
+  "name": "AI Code Reviewer",
+  "url": "https://example.com/code-reviewer",
+  "hook_attributes": {
+    "url": "https://sas.example.com/github-code-review-app",
+    "active": true
+  },
+  "redirect_url": "https://example.com/code-reviewer/github-app/callback",
+  "callback_urls": [],
+  "public": false,
+  "default_events": [
+    "pull_request"
+  ],
+  "default_permissions": {
+    "checks": "write",
+    "contents": "read",
+    "metadata": "read",
+    "pull_requests": "write"
+  }
+}

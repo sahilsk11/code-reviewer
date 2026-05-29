@@ -84,6 +84,18 @@ code-review control ignore --finding-id finding-123
 code-review control resolve --finding-id finding-123
 ```
 
+Generate a GitHub App manifest for the future SAS-backed webhook path:
+
+```sh
+code-review github-app manifest \
+  --webhook-url https://sas.example.com/github-code-review-app
+```
+
+The manifest is documented in [docs/github-app.md](docs/github-app.md). It does
+not replace the GitHub Actions runner path yet; keep the Actions workflow and
+required `AI Code Review` check in place until the app worker and app-owned
+check-run publisher are complete.
+
 ## GitHub Actions
 
 Copy `.github/workflows/ai-code-review.yml` into a target repo and update the

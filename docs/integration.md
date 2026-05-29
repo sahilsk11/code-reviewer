@@ -1,5 +1,11 @@
 # Integration
 
+The current production integration is GitHub Actions. The GitHub App manifest
+and SAS webhook queue are being introduced as a separate path; keep this
+workflow installed and required until the app worker and app-owned check-run
+publisher are complete. See [GitHub App Setup](github-app.md) for the manifest,
+SAS secret contract, and deferred worker pieces.
+
 1. Copy `.github/workflows/ai-code-review.yml` into the target repository.
 2. Register a trusted self-hosted runner with the label `code-reviewer`.
 3. Run the service as the `code-reviewer` Unix user. Ensure that user has
