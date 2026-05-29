@@ -227,8 +227,15 @@ def cmd_review(args: argparse.Namespace) -> int:
     if result.returncode == 0:
         store.mark_succeeded(run.id, exit_code=result.returncode)
     else:
+        ensure_archon_terminal(archon=archon, run=store.get_run(run.id), cwd=repo)
         store.mark_failed(run.id, exit_code=result.returncode)
     return result.returncode
+
+
+def ensure_archon_terminal(*, archon: ArchonClient, run: ReviewRun, cwd: Path) -> None:
+    archon_run = find_archon_run(archon, run, cwd=cwd)
+    if archon_run is not None:
+        archon.abandon_and_verify(archon_run.id, cwd=cwd)
 
 
 def cmd_control(args: argparse.Namespace) -> int:

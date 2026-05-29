@@ -207,6 +207,47 @@ def test_review_marks_active_run_with_missing_checkout_canceled(tmp_path: Path) 
     assert old_run.status == "canceled"
 
 
+def test_review_abandons_archon_run_before_marking_failed(tmp_path: Path) -> None:
+    fake_archon = Mock()
+    fake_archon.active_runs.return_value = [
+        ArchonRun(
+            id="archon-run-1",
+            workflow_name="ai-code-review-failed",
+            status="running",
+            raw={},
+        )
+    ]
+    fake_archon.run_workflow.return_value = ArchonResult(
+        returncode=247,
+        output='{"workflowRunId":"archon-run-1"}\n',
+        archon_run_id="archon-run-1",
+    )
+    db_path = tmp_path / "runs.db"
+
+    with patch("code_reviewer.cli.ArchonClient", return_value=fake_archon):
+        result = main(
+            [
+                "review",
+                "--repo",
+                str(tmp_path),
+                "--pr-url",
+                "https://github.com/owner/repo/pull/7",
+                "--head-sha",
+                "newsha",
+                "--db-path",
+                str(db_path),
+            ]
+        )
+
+    assert result == 247
+    fake_archon.abandon_and_verify.assert_called_once_with("archon-run-1", cwd=tmp_path.resolve())
+    with sqlite3.connect(db_path) as connection:
+        row = connection.execute(
+            "select status, archon_run_id, exit_code from code_review_runs"
+        ).fetchone()
+    assert row == ("failed", "archon-run-1", 247)
+
+
 def test_review_rejects_removed_no_install_flag(tmp_path: Path) -> None:
     with patch("code_reviewer.cli.ArchonClient"):
         try:
