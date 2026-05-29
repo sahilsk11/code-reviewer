@@ -1,14 +1,22 @@
 # Integration
 
 1. Copy `.github/workflows/ai-code-review.yml` into the target repository.
-2. Update the `Install Archon` step to use the organization's pinned Archon install source.
-3. Update the `Install code-reviewer` step to use a pinned tag or internal package source.
-4. Add an `OPENCODE_API_KEY` repository or organization secret for review runs.
+2. Register a trusted self-hosted runner with the label `code-reviewer`.
+3. Run the service as the `code-reviewer` Unix user. Ensure that user has
+   Archon, Codex, and GitHub CLI on `PATH`, and Codex authenticated.
+4. Update the `Install code-reviewer` step to use a pinned tag or internal package source.
 5. Merge the workflow.
 6. In branch protection, require the `AI Code Review` check.
 
-The workflow writes the OpenCode API key into
-`~/.local/share/opencode/auth.json` before running Archon.
+The self-hosted runner job is gated to same-repository pull requests from
+trusted authors. A separate GitHub-hosted `AI Code Review` job remains required
+and fails when the runner job is skipped or unsuccessful, so branch protection
+does not treat skipped self-hosted reviews as passing. The review uses the
+runner user's local Codex authentication through Archon and exports
+`CODEX_BIN_PATH` from the runner's `codex` binary before invoking the review.
+The bundled Archon workflow grants Codex access to `/home/code-reviewer/wt` for
+prepared review worktrees and `/home/code-reviewer/.kanna` for runner-user
+transcripts.
 
 The workflow checks out `github.event.pull_request.head.sha` and passes that SHA
 to `code-review review`. The reviewer must use that exact SHA for all review and
