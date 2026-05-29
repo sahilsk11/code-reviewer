@@ -131,7 +131,7 @@ def discover_repo_candidates(
     for pr in list_prs(repo, limit=limit_prs):
         comments = list_review_comments(repo, pr_number=pr["number"])
         bot_comments = [comment for comment in comments if comment["author"] == bot_author]
-        bot_findings = [comment for comment in bot_comments if review_comment_severity(comment["body"]) != "unknown"]
+        bot_findings = [comment for comment in bot_comments if review_comment_priority(comment["body"])]
         if len(bot_findings) < min_bot_comments:
             continue
         followups = [
@@ -191,7 +191,7 @@ def list_review_comments(repo: str, *, pr_number: int) -> list[dict[str, Any]]:
 
 def summarize_finding(comment: dict[str, Any]) -> dict[str, Any]:
     return {
-        "severity": review_comment_severity(comment["body"]),
+        "severity": review_comment_priority(comment["body"]) or "unknown",
         "title": review_comment_title(comment["body"]),
         "path": comment.get("path"),
         "line": comment.get("line") or comment.get("original_line"),
@@ -200,14 +200,10 @@ def summarize_finding(comment: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def review_comment_severity(body: str) -> str:
-    return review_comment_priority(body) or "unknown"
-
-
 def severity_counts(comments: list[dict[str, Any]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for comment in comments:
-        severity = review_comment_severity(comment["body"])
+        severity = review_comment_priority(comment["body"]) or "unknown"
         counts[severity] = counts.get(severity, 0) + 1
     return counts
 
@@ -233,7 +229,7 @@ def candidate_score(
     followups: list[dict[str, Any]],
     commits: list[str],
 ) -> int:
-    p1_count = sum(1 for comment in bot_comments if review_comment_severity(comment["body"]) == "P1")
+    p1_count = sum(1 for comment in bot_comments if review_comment_priority(comment["body"]) == "P1")
     return len(bot_comments) * 2 + len(followups) * 4 + p1_count * 2 + max(0, len(commits) - 1)
 
 

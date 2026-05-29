@@ -11,7 +11,7 @@ from code_reviewer.commands import cleanup_worktree
 
 
 JSON_FENCE_RE = re.compile(
-    r"```(?:json)?\s*(?:publish_payload)?\s*(?P<body>\{.*?\})\s*```",
+    r"```(?:json)?\s*(?:publish_payload)?\s*(?P<body>.*?)\s*```",
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -80,18 +80,35 @@ def main(argv: list[str] | None = None) -> int:
 
 def extract_publish_payload(text: str) -> dict[str, Any]:
     candidates = [match.group("body") for match in JSON_FENCE_RE.finditer(text)]
+    candidates.append(text)
     if not candidates:
         raise SystemExit("aggregate_dedupe output did not contain publish_payload JSON")
 
     for candidate in reversed(candidates):
-        try:
-            data = json.loads(candidate)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(data, dict):
+        data = first_publish_payload(candidate)
+        if data is not None:
             return data
 
-    raise SystemExit("aggregate_dedupe publish_payload JSON could not be parsed")
+    raise SystemExit("aggregate_dedupe output did not contain publish_payload JSON")
+
+
+def first_publish_payload(text: str) -> dict[str, Any] | None:
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
+        try:
+            data, _end = decoder.raw_decode(text[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        if isinstance(data, dict) and looks_like_publish_payload(data):
+            return data
+    return None
+
+
+def looks_like_publish_payload(data: dict[str, Any]) -> bool:
+    required = ("blocking_count", "non_blocking_count", "check_conclusion", "findings")
+    if all(key in data for key in required):
+        return True
+    return isinstance(data.get("publish_payload"), dict)
 
 
 def validate_publish_payload(payload: dict[str, Any]) -> str | None:

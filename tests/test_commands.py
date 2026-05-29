@@ -257,3 +257,30 @@ def test_finalize_review_reads_publish_payload_from_file(tmp_path: Path) -> None
         )
 
     assert result == 1
+
+
+def test_finalize_review_accepts_unfenced_publish_payload(tmp_path: Path) -> None:
+    aggregate_output = """
+Summary text with earlier braces like {not json}.
+
+{
+  "blocking_count": 0,
+  "non_blocking_count": 1,
+  "check_conclusion": "success",
+  "findings": [
+    {"id": "n1", "blocking": false}
+  ]
+}
+"""
+
+    with patch.object(cleanup_worktree, "main", return_value=0):
+        result = finalize_review.main(
+            [
+                "--aggregate-output",
+                aggregate_output,
+                "--worktree-manifest",
+                str(tmp_path / "manifest.json"),
+            ]
+        )
+
+    assert result == 0

@@ -50,6 +50,13 @@ def review_comment_priority(body: str) -> str | None:
     return f"P{match.group(1)}" if match else None
 
 
+def review_comment_severity(body: str) -> str:
+    priority = review_comment_priority(body)
+    if not priority:
+        return "unknown"
+    return {"P0": "high", "P1": "high", "P2": "medium", "P3": "low"}[priority]
+
+
 def review_comment_terms(body: str, title: str) -> list[str]:
     code_terms = [term.strip() for term in re.findall(r"`([^`]+)`", body) if term.strip()]
     title_terms = [
@@ -64,4 +71,3 @@ def review_comment_terms(body: str, title: str) -> list[str]:
         if len(terms) >= 5:
             break
     return terms
-

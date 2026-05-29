@@ -13,7 +13,7 @@ try:
     from evals._review_comments import (
         compact_review_comment,
         flatten_pages,
-        review_comment_priority,
+        review_comment_severity,
         review_comment_terms,
         review_comment_title,
         run,
@@ -22,7 +22,7 @@ except ModuleNotFoundError:
     from _review_comments import (  # type: ignore[no-redef]
         compact_review_comment,
         flatten_pages,
-        review_comment_priority,
+        review_comment_severity,
         review_comment_terms,
         review_comment_title,
         run,
@@ -194,23 +194,15 @@ def gh_pr_review_comments(*, repo: str, pr_number: int, author: str, commit_sha:
 
 def review_comment_to_label(comment: dict[str, Any]) -> dict[str, Any]:
     title = review_comment_title(comment["body"])
-    severity = review_comment_severity(comment["body"])
     return {
         "id": slug(f"{comment.get('path', 'finding')}-{title}"),
         "file": comment.get("path"),
         "line": comment.get("line") or comment.get("original_line"),
-        "severity": severity,
+        "severity": review_comment_severity(comment["body"]),
         "summary": title,
         "must_include": review_comment_terms(comment["body"], title),
         "source_comment_url": comment.get("html_url") or comment.get("url"),
     }
-
-
-def review_comment_severity(body: str) -> str:
-    priority = review_comment_priority(body)
-    if not priority:
-        return "unknown"
-    return {"P0": "high", "P1": "high", "P2": "medium", "P3": "low"}[priority]
 
 
 def capture_diff(*, repo: str, pr_number: int, base_ref: str, base_sha: str, target_sha: str) -> tuple[str, str]:

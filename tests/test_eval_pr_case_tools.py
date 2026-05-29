@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from evals import capture_pr_case, discover_pr_review_cases
+from evals._review_comments import review_comment_priority, review_comment_title
 
 
 def test_discover_resolves_github_remotes() -> None:
@@ -15,8 +16,8 @@ def test_discover_summarizes_codex_review_comment() -> None:
 Details.
 """
 
-    assert discover_pr_review_cases.review_comment_title(body) == 'Keep CI errors from being treated as "no checks"'
-    assert discover_pr_review_cases.review_comment_severity(body) == "P1"
+    assert review_comment_title(body) == 'Keep CI errors from being treated as "no checks"'
+    assert review_comment_priority(body) == "P1"
     assert discover_pr_review_cases.has_followup_signal("Fixed in 123abc with a regression test.")
 
 
