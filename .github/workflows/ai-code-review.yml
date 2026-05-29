@@ -110,8 +110,13 @@ jobs:
             status="${PIPESTATUS[0]}"
 
             if [ "$status" -eq 247 ] && [ "$attempt" -eq 1 ] && ! grep -q '\[publish_review\] Started' "$log_file"; then
-              echo "Archon/OpenCode exited 247 before publishing started; retrying once."
-              sleep 10
+              echo "Archon/OpenCode exited 247 before publishing started; waiting for active workflow lock before retrying once."
+              for _ in $(seq 1 24); do
+                if archon workflow status --json --cwd . 2>/dev/null | grep -q '"runs": \[\]'; then
+                  break
+                fi
+                sleep 5
+              done
               continue
             fi
 

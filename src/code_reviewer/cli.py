@@ -12,12 +12,56 @@ from typing import Sequence
 
 WORKFLOW_NAME = "ai-code-review"
 WORKFLOW_FILENAME = f"{WORKFLOW_NAME}.yaml"
+BRAINTRUST_PROJECT = "My Project"
+SENSITIVE_ARG_NAMES = {
+    "--api-key",
+    "--password",
+    "--reason",
+    "--secret",
+    "--token",
+}
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    configure_braintrust(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
     return args.func(args)
+
+
+def configure_braintrust(argv: Sequence[str] | None = None) -> None:
+    if not os.environ.get("BRAINTRUST_API_KEY"):
+        return
+
+    try:
+        import braintrust
+
+        braintrust.auto_instrument()
+        logger = braintrust.init_logger(project=BRAINTRUST_PROJECT)
+        logger.log(
+            input={"argv": sanitize_argv(list(argv) if argv is not None else sys.argv[1:])},
+            metadata={"service": "code-reviewer"},
+            tags=["code-reviewer", "cli"],
+        )
+    except Exception:
+        return
+
+
+def sanitize_argv(argv: Sequence[str]) -> list[str]:
+    sanitized = []
+    redact_next = False
+    for item in argv:
+        if redact_next:
+            sanitized.append("[redacted]")
+            redact_next = False
+            continue
+        if "=" in item:
+            name, _value = item.split("=", 1)
+            sanitized.append(f"{name}=[redacted]" if name in SENSITIVE_ARG_NAMES else item)
+            continue
+        sanitized.append(item)
+        redact_next = item in SENSITIVE_ARG_NAMES
+    return sanitized
 
 
 def build_parser() -> argparse.ArgumentParser:

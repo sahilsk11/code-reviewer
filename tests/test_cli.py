@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from code_reviewer.cli import build_review_payload, main
+from code_reviewer.cli import build_review_payload, main, sanitize_argv
 
 
 def test_install_workflow(tmp_path: Path) -> None:
@@ -120,3 +120,34 @@ def test_control_outputs_stable_token(capsys) -> None:
     assert "code-review:control" in output
     assert '"command": "ignore"' in output
     assert '"finding_id": "finding-1"' in output
+
+
+def test_sanitize_argv_redacts_secret_like_values() -> None:
+    assert sanitize_argv(["control", "ignore", "--reason", "token-123"]) == [
+        "control",
+        "ignore",
+        "--reason",
+        "[redacted]",
+    ]
+    assert sanitize_argv(["review", "--api-key=token-123", "--pr-url", "https://example.test/pr/1"]) == [
+        "review",
+        "--api-key=[redacted]",
+        "--pr-url",
+        "https://example.test/pr/1",
+    ]
+
+
+def test_braintrust_setup_failure_does_not_crash_cli(monkeypatch) -> None:
+    import builtins
+
+    real_import = builtins.__import__
+
+    def fail_braintrust_import(name, *args, **kwargs):
+        if name == "braintrust":
+            raise ImportError("missing braintrust")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setenv("BRAINTRUST_API_KEY", "test-key")
+    monkeypatch.setattr(builtins, "__import__", fail_braintrust_import)
+
+    assert main(["control", "pause"]) == 0
