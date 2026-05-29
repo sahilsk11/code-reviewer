@@ -1,0 +1,8 @@
+{
+  "teacher": {
+    "check_conclusion": "success",
+    "findings": [],
+    "summary": "No high-confidence correctness findings in the provided frozen diff."
+  },
+  "teacher_model": "gpt-5.5"
+}
