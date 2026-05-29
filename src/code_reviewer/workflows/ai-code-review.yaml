@@ -9,7 +9,7 @@ description: |
   NOT for: Ad hoc local linting, broad product planning, or non-PR review.
 
 provider: codex
-model: gpt-5.3-codex-spark
+model: gpt-5.5
 modelReasoningEffort: high
 worktree:
   enabled: false
@@ -25,7 +25,7 @@ nodes:
 
   - id: find_implementation_transcript
     context: fresh
-    model: gpt-5.3-codex-spark
+    model: gpt-5.5
     effort: medium
     prompt: |
       Identify the canonical implementation transcript for this pull request, if one exists.
@@ -60,7 +60,7 @@ nodes:
 
   - id: summarize_intent
     context: fresh
-    model: gpt-5.3-codex-spark
+    model: gpt-5.5
     effort: high
     prompt: |
       Create the shared intent and context brief for this pull request.
@@ -103,7 +103,7 @@ nodes:
 
   - id: reviewer_correctness_regressions
     context: fresh
-    model: gpt-5.3-codex-spark
+    model: gpt-5.5
     effort: high
     prompt: |
       Review this PR for correctness and regressions.
@@ -137,7 +137,7 @@ nodes:
 
   - id: reviewer_design_layering_reuse
     context: fresh
-    model: gpt-5.3-codex-spark
+    model: gpt-5.5
     effort: high
     prompt: |
       Review this PR for design, layering, abstraction boundaries, and reuse.
@@ -173,7 +173,7 @@ nodes:
 
   - id: reviewer_simplicity_alternatives
     context: fresh
-    model: gpt-5.3-codex-spark
+    model: gpt-5.5
     effort: medium
     prompt: |
       Review this PR for simplicity, directness, and better alternatives.
@@ -207,7 +207,7 @@ nodes:
 
   - id: aggregate_dedupe
     context: fresh
-    model: gpt-5.3-codex-spark
+    model: gpt-5.5
     effort: high
     prompt: |
       Aggregate the multi-agent review into the final publishable result.
@@ -254,7 +254,7 @@ nodes:
 
   - id: publish_review
     context: fresh
-    model: gpt-5.3-codex-spark
+    model: gpt-5.5
     effort: high
     prompt: |
       Publish the final AI Code Review result to GitHub.
