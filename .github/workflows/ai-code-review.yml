@@ -57,29 +57,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          set +e
-          for attempt in 1 2; do
-            log_file="$RUNNER_TEMP/code-review-attempt-$attempt.log"
-            code-review review \
-              --repo . \
-              --event-path "$GITHUB_EVENT_PATH" \
-              --head-sha "$PR_HEAD_SHA" \
-              --mode incremental 2>&1 | tee "$log_file"
-            status="${PIPESTATUS[0]}"
-
-            if [ "$status" -eq 247 ] && [ "$attempt" -eq 1 ] && ! grep -q '\[publish_review\] Started' "$log_file"; then
-              echo "Archon workflow exited 247 before publishing started; waiting for active workflow lock before retrying once."
-              for _ in $(seq 1 24); do
-                if archon workflow status --json --cwd . 2>/dev/null | grep -q '"runs": \[\]'; then
-                  break
-                fi
-                sleep 5
-              done
-              continue
-            fi
-
-            exit "$status"
-          done
+          code-review review \
+            --repo . \
+            --event-path "$GITHUB_EVENT_PATH" \
+            --head-sha "$PR_HEAD_SHA" \
+            --mode incremental
 
   required:
     name: AI Code Review

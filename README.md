@@ -1,11 +1,11 @@
 # code-reviewer
 
-Thin Python CLI wrapper for an Archon-powered pull request reviewer.
+Python CLI wrapper for an Archon-powered pull request reviewer.
 
-The Python package intentionally stays small. It installs and runs a bundled
-Archon workflow named `ai-code-review`; the review logic, GitHub comments,
-deduplication, stale-run handling, and blocking-finding decisions live in that
-workflow.
+The Python package builds the Archon workflow at runtime from prompt resources
+and run configuration, records review run state in SQLite, and invokes Archon.
+The review logic, GitHub comments, deduplication, stale-run handling, and
+blocking-finding decisions still live in the generated workflow.
 
 ## Install for development
 
@@ -42,9 +42,11 @@ Run a review manually:
 
 ```sh
 code-review review \
-  --repo /path/to/target/repo \
   --pr-url https://github.com/owner/repo/pull/123
 ```
+
+The PR URL is enough for manual runs when GitHub CLI can resolve the head SHA.
+`--repo` defaults to the current directory.
 
 Run without publishing comments or checks:
 
@@ -55,6 +57,19 @@ code-review review \
   --mode full \
   --dry-run
 ```
+
+Select a workflow harness/provider or model for a run:
+
+```sh
+code-review review \
+  --pr-url https://github.com/owner/repo/pull/123 \
+  --harness opencode \
+  --model opencode-go/deepseek-v4-pro
+```
+
+`--mode incremental|full` is currently passed through to the workflow payload so
+prompts and reviewer controls can distinguish normal and full reviews. It does
+not change the Python runner behavior.
 
 Reviewer controls emit stable tokens that the workflow can read from PR
 comments or operator logs:
@@ -87,11 +102,20 @@ verification commands.
 The required check should be named `AI Code Review`. Configure branch protection
 to require that check once the workflow is installed in the target repository.
 
-## Workflow
+## Workflow And State
 
-The shipped workflow lives at `src/code_reviewer/workflows/ai-code-review.yaml`.
-The `.archon/workflows/ai-code-review.yaml` copy is kept in this repository so
-Archon can discover and preview the workflow locally.
+The generated workflow is assembled from `src/code_reviewer/workflow_builder.py`
+and prompt files in `src/code_reviewer/prompts/`. `install-workflow` writes the
+default generated workflow to `.archon/workflows/ai-code-review.yaml`. Each
+review run writes a run-specific workflow such as
+`.archon/workflows/ai-code-review-<id>.yaml` before invoking Archon.
+
+Run state is stored in `~/.code-reviews/runs.db`. The CLI records repository,
+PR number, head SHA, mode, harness, model, generated workflow name/path/YAML,
+status, Archon run id when observed, and exit code. Before starting a new run,
+the CLI looks for active code-reviewer runs for the same repository and PR,
+abandons the matching Archon run when it can identify one, verifies the run is
+gone from `archon workflow status`, then marks the old run canceled.
 
 Deterministic workflow steps are Python command modules:
 

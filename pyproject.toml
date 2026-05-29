@@ -31,7 +31,7 @@ packages = ["src/code_reviewer"]
 "src" = ""
 
 [tool.hatch.build.targets.wheel.force-include]
-"src/code_reviewer/workflows/ai-code-review.yaml" = "code_reviewer/workflows/ai-code-review.yaml"
+"src/code_reviewer/prompts" = "code_reviewer/prompts"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
