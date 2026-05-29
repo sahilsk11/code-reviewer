@@ -120,16 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Archon executable to invoke.",
     )
     review.add_argument(
-        "--no-install",
-        action="store_true",
-        help="Do not write the generated workflow before running.",
-    )
-    review.add_argument("--db-path", help=argparse.SUPPRESS)
-    review.add_argument(
         "--dry-run",
         action="store_true",
         help="Run the review without publishing GitHub comments or checks.",
     )
+    review.add_argument("--db-path", help=argparse.SUPPRESS)
     review.set_defaults(func=cmd_review)
 
     control = subparsers.add_parser(
@@ -192,8 +187,7 @@ def cmd_review(args: argparse.Namespace) -> int:
         model=args.model,
     )
     workflow_yaml = render_workflow(workflow_config)
-    if not args.no_install:
-        write_workflow(workflow_path, workflow_config)
+    write_workflow(workflow_path, workflow_config)
 
     store = RunStore(Path(args.db_path).expanduser().resolve() if args.db_path else None)
     archon = ArchonClient(args.archon_bin)
@@ -203,6 +197,7 @@ def cmd_review(args: argparse.Namespace) -> int:
         repository=repository,
         pr_number=pr_number,
         replacement_run_id=run_id,
+        current_repo=repo,
     )
     run = store.create_run(
         run_id=run_id,
@@ -331,17 +326,27 @@ def cancel_active_runs(
     repository: str,
     pr_number: int,
     replacement_run_id: str,
+    current_repo: Path,
 ) -> None:
     for run in store.active_runs_for_pr(repository=repository, pr_number=pr_number):
         store.mark_canceling(run.id)
-        archon_run = find_archon_run(archon, run)
+        run_repo = Path(run.repo_path)
+        if not run_repo.exists():
+            store.mark_canceled(run.id, superseded_by=replacement_run_id)
+            continue
+
+        status_cwd = run_repo
+        archon_run = find_archon_run(archon, run, cwd=status_cwd)
+        if archon_run is None and run_repo != current_repo:
+            status_cwd = current_repo
+            archon_run = find_archon_run(archon, run, cwd=status_cwd)
         if archon_run is not None:
-            archon.abandon_and_verify(archon_run.id, cwd=Path(run.repo_path))
+            archon.abandon_and_verify(archon_run.id, cwd=status_cwd)
         store.mark_canceled(run.id, superseded_by=replacement_run_id)
 
 
-def find_archon_run(archon: ArchonClient, run: ReviewRun) -> ArchonRun | None:
-    active = archon.active_runs(cwd=Path(run.repo_path))
+def find_archon_run(archon: ArchonClient, run: ReviewRun, *, cwd: Path) -> ArchonRun | None:
+    active = archon.active_runs(cwd=cwd)
 
     for archon_run in active:
         if run.archon_run_id and archon_run.id == run.archon_run_id:

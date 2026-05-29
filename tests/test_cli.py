@@ -161,6 +161,73 @@ def test_review_abandons_existing_active_archon_run_for_same_pr(tmp_path: Path) 
     assert sorted(status for (status,) in statuses) == ["canceled", "succeeded"]
 
 
+def test_review_marks_active_run_with_missing_checkout_canceled(tmp_path: Path) -> None:
+    db_path = tmp_path / "runs.db"
+    missing_repo = tmp_path / "missing-old-checkout"
+    store = RunStore(db_path)
+    old = store.create_run(
+        repository="owner/repo",
+        pr_number=7,
+        head_sha="oldsha",
+        mode="incremental",
+        harness="opencode",
+        model="old-model",
+        repo_path=missing_repo,
+        workflow_name="ai-code-review-old",
+        workflow_path=missing_repo / ".archon" / "workflows" / "ai-code-review-old.yaml",
+        workflow_yaml="name: ai-code-review-old\n",
+    )
+
+    fake_archon = Mock()
+    fake_archon.active_runs.return_value = []
+    fake_archon.run_workflow.return_value = ArchonResult(
+        returncode=0,
+        output="",
+        archon_run_id="archon-new",
+    )
+
+    with patch("code_reviewer.cli.ArchonClient", return_value=fake_archon):
+        result = main(
+            [
+                "review",
+                "--repo",
+                str(tmp_path),
+                "--pr-url",
+                "https://github.com/owner/repo/pull/7",
+                "--head-sha",
+                "newsha",
+                "--db-path",
+                str(db_path),
+            ]
+        )
+
+    assert result == 0
+    fake_archon.abandon_and_verify.assert_not_called()
+    old_run = RunStore(db_path).get_run(old.id)
+    assert old_run.status == "canceled"
+
+
+def test_review_rejects_removed_no_install_flag(tmp_path: Path) -> None:
+    with patch("code_reviewer.cli.ArchonClient"):
+        try:
+            main(
+                [
+                    "review",
+                    "--repo",
+                    str(tmp_path),
+                    "--pr-url",
+                    "https://github.com/owner/repo/pull/7",
+                    "--head-sha",
+                    "newsha",
+                    "--no-install",
+                ]
+            )
+        except SystemExit as exc:
+            assert exc.code == 2
+        else:
+            raise AssertionError("--no-install should be rejected")
+
+
 def test_control_outputs_stable_token(capsys) -> None:
     result = main(["control", "ignore", "--finding-id", "finding-1"])
 
