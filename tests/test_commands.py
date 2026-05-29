@@ -188,3 +188,26 @@ def test_finalize_review_succeeds_without_blocking_findings(tmp_path: Path) -> N
         )
 
     assert result == 0
+
+
+def test_finalize_review_reads_publish_payload_from_file(tmp_path: Path) -> None:
+    aggregate_output = tmp_path / "aggregate.md"
+    aggregate_output.write_text(
+        """
+```json publish_payload
+{"blocking_count": 1, "check_conclusion": "failure", "findings": []}
+```
+"""
+    )
+
+    with patch.object(cleanup_worktree, "main", return_value=0):
+        result = finalize_review.main(
+            [
+                "--aggregate-output-file",
+                str(aggregate_output),
+                "--worktree-manifest",
+                str(tmp_path / "manifest.json"),
+            ]
+        )
+
+    assert result == 1

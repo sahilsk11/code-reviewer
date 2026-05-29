@@ -20,11 +20,17 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Clean the review worktree and exit non-zero for blocking findings."
     )
-    parser.add_argument("--aggregate-output", required=True)
+    aggregate_group = parser.add_mutually_exclusive_group(required=True)
+    aggregate_group.add_argument("--aggregate-output")
+    aggregate_group.add_argument("--aggregate-output-file", type=Path)
     parser.add_argument("--worktree-manifest", required=True)
     args = parser.parse_args(argv)
 
-    payload = extract_publish_payload(args.aggregate_output)
+    aggregate_output = args.aggregate_output
+    if args.aggregate_output_file is not None:
+        aggregate_output = args.aggregate_output_file.read_text()
+
+    payload = extract_publish_payload(aggregate_output)
     cleanup_status = cleanup_worktree.main(
         ["--worktree-manifest", args.worktree_manifest]
     )

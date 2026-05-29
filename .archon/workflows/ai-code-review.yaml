@@ -331,8 +331,11 @@ nodes:
 
       Requirements:
       - If the original review payload has `dry_run: true`, do not create,
-        update, or delete any GitHub comments, reviews, or checks. Produce the
-        exact summary/comment/check payloads that would have been published.
+        update, or delete any GitHub comments or reviews. Produce the exact
+        summary/comment payloads that would have been published.
+      - Do not create, update, or delete GitHub check runs or commit statuses.
+        The GitHub Actions job owns the required check result. The deterministic
+        `cleanup_worktree` node will fail the job when blocking findings remain.
       - Use the GitHub CLI/API from the prepared worktree.
       - Update one stable PR summary comment identified by a hidden
         `code-review:summary` marker.
@@ -342,13 +345,11 @@ nodes:
       - Do not post a duplicate inline comment for findings whose
         `post_inline` is false because an active unresolved comment already
         exists.
-      - Include carried-forward active blockers in the summary and check result
+      - Include carried-forward active blockers in the summary
         even when no new inline comment is posted for them.
       - Include hidden stable finding metadata in posted inline comments.
       - Mark older summary comments stale when they refer to older SHAs.
       - Avoid reposting duplicate inline comments.
-      - Set the `AI Code Review` check conclusion to failure only when blocking
-        findings remain; otherwise set it to success.
       - If GitHub publishing fails, diagnose and fix ordinary scripting/API
         mistakes, then retry once. If credentials or permissions are missing,
         report the exact blocker.
@@ -356,15 +357,20 @@ nodes:
       Output:
       - Summary comment URL or publishing blocker.
       - Inline comments posted, skipped as duplicates, or suppressed by controls.
-      - Final check conclusion and reason.
+      - Final blocking conclusion and reason that the deterministic cleanup node
+        will enforce through the Actions job exit code.
       - In dry-run mode, the would-be summary comment body, inline comments, and
-        check conclusion instead of GitHub URLs.
+        blocking conclusion instead of GitHub URLs.
     depends_on: [aggregate_dedupe]
 
   - id: cleanup_worktree
     bash: |
       set -euo pipefail
+      aggregate_output_file="$(mktemp)"
+      cat > "$aggregate_output_file" <<'CODE_REVIEW_AGGREGATE_OUTPUT'
+      $aggregate_dedupe.output
+      CODE_REVIEW_AGGREGATE_OUTPUT
       "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.finalize_review \
-        --aggregate-output "$aggregate_dedupe.output" \
+        --aggregate-output-file "$aggregate_output_file" \
         --worktree-manifest "$prepare_worktree.output"
     depends_on: [publish_review]
