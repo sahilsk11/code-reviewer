@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from code_reviewer.cli import build_review_payload, main
+from code_reviewer.cli import build_review_payload, main, sanitize_argv
 
 
 def test_install_workflow(tmp_path: Path) -> None:
@@ -120,3 +120,18 @@ def test_control_outputs_stable_token(capsys) -> None:
     assert "code-review:control" in output
     assert '"command": "ignore"' in output
     assert '"finding_id": "finding-1"' in output
+
+
+def test_sanitize_argv_redacts_secret_like_values() -> None:
+    assert sanitize_argv(["control", "ignore", "--reason", "token-123"]) == [
+        "control",
+        "ignore",
+        "--reason",
+        "[redacted]",
+    ]
+    assert sanitize_argv(["review", "--api-key=token-123", "--pr-url", "https://example.test/pr/1"]) == [
+        "review",
+        "--api-key=[redacted]",
+        "--pr-url",
+        "https://example.test/pr/1",
+    ]

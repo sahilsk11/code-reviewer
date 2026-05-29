@@ -9,6 +9,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+try:
+    from evals._review_comments import (
+        compact_review_comment,
+        flatten_pages,
+        review_comment_priority,
+        review_comment_title,
+        run,
+    )
+except ModuleNotFoundError:
+    from _review_comments import (  # type: ignore[no-redef]
+        compact_review_comment,
+        flatten_pages,
+        review_comment_priority,
+        review_comment_title,
+        run,
+    )
+
 
 DEFAULT_PROJECTS_DIR = Path.home() / "projects"
 DEFAULT_BOT_AUTHOR = "chatgpt-codex-connector[bot]"
@@ -172,25 +189,6 @@ def list_review_comments(repo: str, *, pr_number: int) -> list[dict[str, Any]]:
     return [compact_review_comment(comment) for comment in raw_comments]
 
 
-def flatten_pages(pages: Any) -> list[dict[str, Any]]:
-    if isinstance(pages, list) and all(isinstance(page, list) for page in pages):
-        return [item for page in pages for item in page]
-    return pages if isinstance(pages, list) else []
-
-
-def compact_review_comment(comment: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "author": (comment.get("user") or {}).get("login"),
-        "body": comment.get("body") or "",
-        "commit_id": comment.get("commit_id"),
-        "created_at": comment.get("created_at"),
-        "html_url": comment.get("html_url"),
-        "line": comment.get("line"),
-        "original_line": comment.get("original_line"),
-        "path": comment.get("path"),
-    }
-
-
 def summarize_finding(comment: dict[str, Any]) -> dict[str, Any]:
     return {
         "severity": review_comment_severity(comment["body"]),
@@ -202,19 +200,8 @@ def summarize_finding(comment: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def review_comment_title(body: str) -> str:
-    first_line = body.strip().splitlines()[0] if body.strip() else "Imported review finding"
-    first_line = re.sub(r"<[^>]+>", "", first_line)
-    first_line = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", first_line)
-    first_line = first_line.replace("**", "").strip()
-    return re.sub(r"\s+", " ", first_line) or "Imported review finding"
-
-
 def review_comment_severity(body: str) -> str:
-    match = re.search(r"\bP([0-3])\b", body)
-    if not match:
-        return "unknown"
-    return f"P{match.group(1)}"
+    return review_comment_priority(body) or "unknown"
 
 
 def severity_counts(comments: list[dict[str, Any]]) -> dict[str, int]:
@@ -296,18 +283,6 @@ def render_markdown(report: dict[str, Any]) -> str:
         lines.extend(f"```bash\n{command}\n```" for command in candidate["capture_commands"])
         lines.append("")
     return "\n".join(lines)
-
-
-def run(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=cwd,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
-
 
 if __name__ == "__main__":
     sys.exit(main())

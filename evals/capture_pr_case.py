@@ -2,13 +2,31 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import subprocess
 import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+try:
+    from evals._review_comments import (
+        compact_review_comment,
+        flatten_pages,
+        review_comment_priority,
+        review_comment_terms,
+        review_comment_title,
+        run,
+    )
+except ModuleNotFoundError:
+    from _review_comments import (  # type: ignore[no-redef]
+        compact_review_comment,
+        flatten_pages,
+        review_comment_priority,
+        review_comment_terms,
+        review_comment_title,
+        run,
+    )
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -50,7 +68,13 @@ def main(argv: list[str] | None = None) -> int:
     base_sha = pr["baseRefOid"]
     target_commit = commits[commit_index]
     target_sha = target_commit["oid"]
-    patch, diff_stat = capture_diff(repo=repo, pr_number=pr["number"], base_sha=base_sha, target_sha=target_sha)
+    patch, diff_stat = capture_diff(
+        repo=repo,
+        pr_number=pr["number"],
+        base_ref=pr["baseRefName"],
+        base_sha=base_sha,
+        target_sha=target_sha,
+    )
     expected = {
         "notes": "Unlabeled captured case. Add teacher output or human labels before scoring quality.",
     }
@@ -104,7 +128,7 @@ def main(argv: list[str] | None = None) -> int:
     }
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    name = args.name or default_case_name(repo=repo, pr_number=pr["number"], commit_index=args.commit_index)
+    name = args.name or default_case_name(repo=repo, pr_number=pr["number"], commit_index=commit_index)
     output_path = args.output_dir / f"{name}.json"
     output_path.write_text(json.dumps(case, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(output_path)
@@ -168,26 +192,6 @@ def gh_pr_review_comments(*, repo: str, pr_number: int, author: str, commit_sha:
     ]
 
 
-def compact_review_comment(comment: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "author": (comment.get("user") or {}).get("login"),
-        "body": comment.get("body") or "",
-        "commit_id": comment.get("commit_id"),
-        "created_at": comment.get("created_at"),
-        "html_url": comment.get("html_url"),
-        "line": comment.get("line"),
-        "original_line": comment.get("original_line"),
-        "path": comment.get("path"),
-        "url": comment.get("url"),
-    }
-
-
-def flatten_pages(pages: Any) -> list[dict[str, Any]]:
-    if isinstance(pages, list) and all(isinstance(page, list) for page in pages):
-        return [item for page in pages for item in page]
-    return pages if isinstance(pages, list) else []
-
-
 def review_comment_to_label(comment: dict[str, Any]) -> dict[str, Any]:
     title = review_comment_title(comment["body"])
     severity = review_comment_severity(comment["body"])
@@ -202,62 +206,41 @@ def review_comment_to_label(comment: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def review_comment_title(body: str) -> str:
-    first_line = body.strip().splitlines()[0] if body.strip() else "Imported review finding"
-    first_line = re.sub(r"<[^>]+>", "", first_line)
-    first_line = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", first_line)
-    first_line = first_line.replace("**", "").strip()
-    first_line = re.sub(r"\s+", " ", first_line)
-    return first_line or "Imported review finding"
-
-
 def review_comment_severity(body: str) -> str:
-    match = re.search(r"\bP([0-3])\b", body)
-    if not match:
+    priority = review_comment_priority(body)
+    if not priority:
         return "unknown"
-    return {"0": "high", "1": "high", "2": "medium", "3": "low"}[match.group(1)]
+    return {"P0": "high", "P1": "high", "P2": "medium", "P3": "low"}[priority]
 
 
-def review_comment_terms(body: str, title: str) -> list[str]:
-    code_terms = [term.strip() for term in re.findall(r"`([^`]+)`", body) if term.strip()]
-    title_terms = [
-        word.lower()
-        for word in re.findall(r"[A-Za-z][A-Za-z0-9_-]{4,}", title)
-        if word.lower() not in {"badge", "should", "review", "finding"}
-    ]
-    terms: list[str] = []
-    for term in code_terms + title_terms:
-        if term not in terms:
-            terms.append(term)
-        if len(terms) >= 5:
-            break
-    return terms
-
-
-def capture_diff(*, repo: str, pr_number: int, base_sha: str, target_sha: str) -> tuple[str, str]:
+def capture_diff(*, repo: str, pr_number: int, base_ref: str, base_sha: str, target_sha: str) -> tuple[str, str]:
     with tempfile.TemporaryDirectory(prefix="capture-pr-case-") as temp_dir:
-        run(["git", "init", "-q"], cwd=Path(temp_dir))
-        run(["git", "remote", "add", "origin", f"https://github.com/{repo}.git"], cwd=Path(temp_dir))
-        run(["git", "fetch", "--depth=50", "origin", f"pull/{pr_number}/head"], cwd=Path(temp_dir))
-        run(["git", "cat-file", "-e", f"{base_sha}^{{commit}}"], cwd=Path(temp_dir))
-        run(["git", "cat-file", "-e", f"{target_sha}^{{commit}}"], cwd=Path(temp_dir))
+        temp_path = Path(temp_dir)
+        run(["git", "init", "-q"], cwd=temp_path)
+        run(["git", "remote", "add", "origin", f"https://github.com/{repo}.git"], cwd=temp_path)
+        run(["git", "fetch", "--depth=50", "origin", f"pull/{pr_number}/head"], cwd=temp_path)
+        run(["git", "fetch", "--depth=1", "origin", base_ref], cwd=temp_path)
+        ensure_commit(temp_path, base_sha)
+        ensure_commit(temp_path, target_sha)
         patch = run(
             ["git", "diff", "--binary", "--find-renames", base_sha, target_sha],
-            cwd=Path(temp_dir),
+            cwd=temp_path,
         ).stdout
-        diff_stat = run(["git", "diff", "--stat", base_sha, target_sha], cwd=Path(temp_dir)).stdout
+        diff_stat = run(["git", "diff", "--stat", base_sha, target_sha], cwd=temp_path).stdout
         return patch, diff_stat
 
 
-def run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=cwd,
-        check=True,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+def ensure_commit(repo_path: Path, sha: str) -> None:
+    if subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=repo_path,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    ).returncode == 0:
+        return
+    run(["git", "fetch", "--depth=1", "origin", sha], cwd=repo_path)
+    run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=repo_path)
 
 
 def default_case_name(*, repo: str, pr_number: int, commit_index: int) -> str:
@@ -266,6 +249,8 @@ def default_case_name(*, repo: str, pr_number: int, commit_index: int) -> str:
 
 
 def slug(value: str) -> str:
+    import re
+
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
