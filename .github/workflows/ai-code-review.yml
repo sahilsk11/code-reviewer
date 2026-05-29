@@ -15,10 +15,13 @@ permissions:
 
 jobs:
   review:
-    name: AI Code Review
-    runs-on: ubuntu-latest
+    name: AI Code Review Runner
+    runs-on: [self-hosted, linux, x64, code-reviewer]
     timeout-minutes: 30
-    if: github.event.pull_request.draft == false
+    if: >-
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      contains(fromJSON('["OWNER", "MEMBER", "COLLABORATOR"]'), github.event.pull_request.author_association)
     steps:
       - name: Checkout exact PR head
         uses: actions/checkout@v5
@@ -31,63 +34,18 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: "22"
-
-      - name: Install Archon
+      - name: Verify runner tools
         run: |
-          python -m pip install --upgrade pip
-          curl -fsSL https://archon.diy/install | INSTALL_DIR="$HOME/.local/bin" bash
-          export PATH="$HOME/.local/bin:$PATH"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          CODEX_BIN_PATH="$(command -v codex)"
+          echo "CODEX_BIN_PATH=$CODEX_BIN_PATH" >> "$GITHUB_ENV"
           archon version
-
-      - name: Install OpenCode
-        run: |
-          npm install -g opencode-ai@1.15.12
-          opencode --version
-
-      - name: Configure OpenCode
-        env:
-          OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
-        run: |
-          test -n "$OPENCODE_API_KEY"
-          mkdir -p "$HOME/.local/share/opencode" "$HOME/.config/opencode"
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          auth_path = Path.home() / ".local/share/opencode/auth.json"
-          auth_path.write_text(
-              json.dumps(
-                  {
-                      "opencode-go": {
-                          "type": "api",
-                          "key": os.environ["OPENCODE_API_KEY"],
-                      }
-                  }
-              )
-          )
-          PY
-          chmod 600 "$HOME/.local/share/opencode/auth.json"
-          python -m json.tool "$HOME/.local/share/opencode/auth.json" > /dev/null
-          cat > "$HOME/.config/opencode/opencode.json" <<'JSON'
-          {
-            "$schema": "https://opencode.ai/config.json",
-            "permission": {
-              "external_directory": {
-                "/home/runner/**": "allow"
-              }
-            }
-          }
-          JSON
+          codex --version
+          codex login status
+          gh --version
 
       - name: Install review tooling
         run: |
-          python -m pip install uv PyYAML
+          python -m pip install --upgrade pip uv PyYAML
 
       - name: Install code-reviewer
         run: |
@@ -110,7 +68,7 @@ jobs:
             status="${PIPESTATUS[0]}"
 
             if [ "$status" -eq 247 ] && [ "$attempt" -eq 1 ] && ! grep -q '\[publish_review\] Started' "$log_file"; then
-              echo "Archon/OpenCode exited 247 before publishing started; waiting for active workflow lock before retrying once."
+              echo "Archon workflow exited 247 before publishing started; waiting for active workflow lock before retrying once."
               for _ in $(seq 1 24); do
                 if archon workflow status --json --cwd . 2>/dev/null | grep -q '"runs": \[\]'; then
                   break
@@ -122,3 +80,40 @@ jobs:
 
             exit "$status"
           done
+
+  required:
+    name: AI Code Review
+    runs-on: ubuntu-latest
+    needs: review
+    if: always()
+    steps:
+      - name: Enforce AI review result
+        env:
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          IS_DRAFT: ${{ github.event.pull_request.draft }}
+          REPOSITORY: ${{ github.repository }}
+          REVIEW_RESULT: ${{ needs.review.result }}
+        run: |
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "AI Code Review is required after the pull request is ready for review."
+            exit 1
+          fi
+
+          if [ "$HEAD_REPOSITORY" != "$REPOSITORY" ]; then
+            echo "AI Code Review is blocked for fork pull requests on the self-hosted runner."
+            exit 1
+          fi
+
+          case "$AUTHOR_ASSOCIATION" in
+            OWNER|MEMBER|COLLABORATOR) ;;
+            *)
+              echo "AI Code Review is blocked for author association: $AUTHOR_ASSOCIATION"
+              exit 1
+              ;;
+          esac
+
+          if [ "$REVIEW_RESULT" != "success" ]; then
+            echo "AI Code Review runner job result: $REVIEW_RESULT"
+            exit 1
+          fi

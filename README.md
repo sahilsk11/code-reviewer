@@ -73,9 +73,16 @@ code-review control resolve --finding-id finding-123
 Copy `.github/workflows/ai-code-review.yml` into a target repo and update the
 package install source if needed.
 
-The workflow requires an `OPENCODE_API_KEY` Actions secret for the OpenCode
-provider account used by review runs. It also installs lightweight review
-tooling so reviewer agents can reproduce common Python verification commands.
+The workflow targets a trusted self-hosted GitHub Actions runner labeled
+`code-reviewer` and only runs for same-repository pull requests from trusted
+authors. The required `AI Code Review` check is enforced by a separate
+GitHub-hosted job so skipped self-hosted jobs cannot pass branch protection.
+The runner service user is expected to be `code-reviewer`; Archon, Codex, and
+GitHub CLI must be available on `PATH`, with Codex authenticated for that user.
+The job exports
+`CODEX_BIN_PATH` from the runner's `codex` binary for Archon, and installs
+lightweight review tooling so reviewer agents can reproduce common Python
+verification commands.
 
 The required check should be named `AI Code Review`. Configure branch protection
 to require that check once the workflow is installed in the target repository.
