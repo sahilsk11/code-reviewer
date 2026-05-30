@@ -12,6 +12,7 @@ DEFAULT_ADDITIONAL_DIRECTORIES = (
     "/home/code-reviewer/wt",
     "/home/code-reviewer/.kanna",
 )
+BASH_NODE_IDS = ("prepare_worktree", "cleanup_worktree")
 
 
 @dataclass(frozen=True)
@@ -95,7 +96,7 @@ def render_workflow(config: WorkflowConfig) -> str:
             "",
             "",
             "nodes:",
-            "  - id: prepare_worktree",
+            f"  - id: {BASH_NODE_IDS[0]}",
             "    bash: |",
             '      set -euo pipefail',
             '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.prepare_worktree \\',
@@ -110,7 +111,7 @@ def render_workflow(config: WorkflowConfig) -> str:
 
     lines.extend(
         [
-            "  - id: cleanup_worktree",
+            f"  - id: {BASH_NODE_IDS[1]}",
             "    bash: |",
             '      set -euo pipefail',
             '      aggregate_output_file="$(mktemp)"',

@@ -1,15 +1,13 @@
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 from dataclasses import dataclass
 from typing import Any
 
-from code_reviewer.env import load_local_env
-from code_reviewer.workflow_builder import AGENT_NODES, DEFAULT_MODEL, read_prompt
+from code_reviewer.env import braintrust_project, load_local_env
+from code_reviewer.workflow_builder import BASH_NODE_IDS, AGENT_NODES, DEFAULT_MODEL, read_prompt
 
-DEFAULT_PROJECT = "Code Reviewer"
 PROMPT_TAGS = ("code-reviewer", "archon", "auto-sync")
 
 
@@ -22,19 +20,37 @@ class LocalPrompt:
     dependencies: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class SyncResult:
+    slug: str
+    name: str
+    project_name: str
+    prompt_file: str
+    dry_run: bool
+    metadata: dict[str, Any]
+    braintrust_id: str | None = None
+    messages: list[dict[str, str]] | None = None
+    model: str | None = None
+    tags: tuple[str, ...] = PROMPT_TAGS
+
+
 def sync_prompts(
     *,
     project_name: str | None = None,
     dry_run: bool = False,
-) -> list[dict[str, Any]]:
+) -> list[SyncResult]:
     load_local_env()
-    project_name = project_name or os.environ.get("BRAINTRUST_PROJECT", DEFAULT_PROJECT)
+    project_name = project_name or braintrust_project()
     local_prompts = read_local_prompts()
     if not local_prompts:
         raise RuntimeError("No local prompts found")
+    current_git_sha = git_sha()
 
     if dry_run:
-        return [dry_run_result(prompt, project_name=project_name) for prompt in local_prompts]
+        return [
+            dry_run_result(prompt, project_name=project_name, git_sha=current_git_sha)
+            for prompt in local_prompts
+        ]
 
     require_api_key()
     from braintrust import projects
@@ -42,6 +58,7 @@ def sync_prompts(
     project = projects.create(name=project_name)
     results = []
     for prompt in local_prompts:
+        metadata = prompt_metadata(prompt, git_sha=current_git_sha)
         saved = project.prompts.create(
             name=prompt.slug,
             slug=prompt.slug,
@@ -49,16 +66,19 @@ def sync_prompts(
             messages=[{"role": "user", "content": prompt.rendered_text}],
             model=DEFAULT_MODEL,
             if_exists="replace",
-            metadata=prompt_metadata(prompt),
+            metadata=metadata,
             tags=PROMPT_TAGS,
         )
         results.append(
-            {
-                "slug": prompt.slug,
-                "name": prompt.slug,
-                "prompt_file": prompt.prompt_file,
-                "braintrust_id": getattr(saved, "id", None),
-            }
+            SyncResult(
+                slug=prompt.slug,
+                name=prompt.slug,
+                project_name=project_name,
+                prompt_file=prompt.prompt_file,
+                braintrust_id=getattr(saved, "id", None),
+                dry_run=False,
+                metadata=metadata,
+            )
         )
     return results
 
@@ -95,31 +115,29 @@ def translate_archon_variables(text: str) -> str:
 
 
 def archon_template_names() -> set[str]:
-    return {"ARGUMENTS", "prepare_worktree", *(node.id for node in AGENT_NODES)}
+    return {"ARGUMENTS", *BASH_NODE_IDS, *(node.id for node in AGENT_NODES)}
 
 
-def dry_run_result(prompt: LocalPrompt, *, project_name: str) -> dict[str, Any]:
-    return {
-        "slug": prompt.slug,
-        "name": prompt.slug,
-        "project_name": project_name,
-        "prompt_file": prompt.prompt_file,
-        "dependencies": list(prompt.dependencies),
-        "messages": [{"role": "user", "content": prompt.rendered_text}],
-        "model": DEFAULT_MODEL,
-        "metadata": prompt_metadata(prompt),
-        "tags": list(PROMPT_TAGS),
-        "dry_run": True,
-    }
+def dry_run_result(prompt: LocalPrompt, *, project_name: str, git_sha: str | None) -> SyncResult:
+    return SyncResult(
+        slug=prompt.slug,
+        name=prompt.slug,
+        project_name=project_name,
+        prompt_file=prompt.prompt_file,
+        dry_run=True,
+        metadata=prompt_metadata(prompt, git_sha=git_sha),
+        messages=[{"role": "user", "content": prompt.rendered_text}],
+        model=DEFAULT_MODEL,
+    )
 
 
-def prompt_metadata(prompt: LocalPrompt) -> dict[str, Any]:
+def prompt_metadata(prompt: LocalPrompt, *, git_sha: str | None) -> dict[str, Any]:
     return {
         "source": "code-reviewer",
         "prompt_file": f"src/code_reviewer/prompts/{prompt.prompt_file}",
         "workflow_node": prompt.slug,
         "dependencies": list(prompt.dependencies),
-        "git_sha": git_sha(),
+        "git_sha": git_sha,
     }
 
 

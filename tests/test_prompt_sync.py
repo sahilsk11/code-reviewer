@@ -35,9 +35,10 @@ def test_sync_prompts_dry_run_returns_braintrust_prompt_inputs(monkeypatch) -> N
     results = prompt_sync.sync_prompts(project_name="Code Reviewer", dry_run=True)
 
     assert len(results) == 7
-    assert results[0]["slug"] == "find_implementation_transcript"
-    assert results[0]["project_name"] == "Code Reviewer"
-    assert results[0]["messages"][0]["role"] == "user"
-    assert results[0]["model"]
-    assert results[0]["metadata"]["workflow_node"] == "find_implementation_transcript"
-    assert "archon" in results[0]["tags"]
+    assert results[0].slug == "find_implementation_transcript"
+    assert results[0].project_name == "Code Reviewer"
+    assert results[0].messages is not None
+    assert results[0].messages[0]["role"] == "user"
+    assert results[0].model
+    assert results[0].metadata["workflow_node"] == "find_implementation_transcript"
+    assert "archon" in results[0].tags

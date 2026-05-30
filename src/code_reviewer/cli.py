@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from code_reviewer import prompt_sync
 from code_reviewer.archon import ArchonClient, ArchonRun
-from code_reviewer.env import load_local_env
+from code_reviewer.env import braintrust_project, load_local_env
 from code_reviewer.github_app_manifest import build_manifest, render_manifest
 from code_reviewer.run_store import ReviewRun, RunStore
 from code_reviewer.workflow_builder import (
@@ -24,7 +24,6 @@ from code_reviewer.workflow_builder import (
     write_workflow,
 )
 
-DEFAULT_BRAINTRUST_PROJECT = "Code Reviewer"
 SENSITIVE_ARG_NAMES = {
     "--api-key",
     "--password",
@@ -328,14 +327,9 @@ def cmd_sync_prompts(args: argparse.Namespace) -> int:
         dry_run=args.dry_run,
     )
     for result in results:
-        slug = result.get("slug", result.get("name"))
-        action = "Would sync" if result.get("dry_run") else "Synced"
-        print(f"{action}: {slug}")
+        action = "Would sync" if result.dry_run else "Synced"
+        print(f"{action}: {result.slug}")
     return 0
-
-
-def braintrust_project() -> str:
-    return os.environ.get("BRAINTRUST_PROJECT", DEFAULT_BRAINTRUST_PROJECT)
 
 
 def install_workflow(repo: Path, *, force: bool = False) -> Path:
