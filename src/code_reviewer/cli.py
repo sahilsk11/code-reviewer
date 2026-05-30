@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from code_reviewer import prompt_sync
 from code_reviewer.archon import ArchonClient, ArchonRun
+from code_reviewer.env import load_local_env
 from code_reviewer.github_app_manifest import build_manifest, render_manifest
 from code_reviewer.run_store import ReviewRun, RunStore
 from code_reviewer.workflow_builder import (
@@ -23,7 +24,7 @@ from code_reviewer.workflow_builder import (
     write_workflow,
 )
 
-BRAINTRUST_PROJECT = "My Project"
+DEFAULT_BRAINTRUST_PROJECT = "Code Reviewer"
 SENSITIVE_ARG_NAMES = {
     "--api-key",
     "--password",
@@ -34,6 +35,7 @@ SENSITIVE_ARG_NAMES = {
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    load_local_env()
     configure_braintrust(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -48,7 +50,7 @@ def configure_braintrust(argv: Sequence[str] | None = None) -> None:
         import braintrust
 
         braintrust.auto_instrument()
-        logger = braintrust.init_logger(project=BRAINTRUST_PROJECT)
+        logger = braintrust.init_logger(project=braintrust_project())
         logger.log(
             input={"argv": sanitize_argv(list(argv) if argv is not None else sys.argv[1:])},
             metadata={"service": "code-reviewer"},
@@ -182,7 +184,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sync.add_argument(
         "--project",
-        default=BRAINTRUST_PROJECT,
+        default=braintrust_project(),
         help="Braintrust project name.",
     )
     sync.add_argument(
@@ -327,8 +329,13 @@ def cmd_sync_prompts(args: argparse.Namespace) -> int:
     )
     for result in results:
         slug = result.get("slug", result.get("name"))
-        print(f"Synced: {slug}")
+        action = "Would sync" if result.get("dry_run") else "Synced"
+        print(f"{action}: {slug}")
     return 0
+
+
+def braintrust_project() -> str:
+    return os.environ.get("BRAINTRUST_PROJECT", DEFAULT_BRAINTRUST_PROJECT)
 
 
 def install_workflow(repo: Path, *, force: bool = False) -> Path:
