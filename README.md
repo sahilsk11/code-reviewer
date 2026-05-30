@@ -134,14 +134,20 @@ Deterministic workflow steps are Python command modules:
 
 ```text
 code_reviewer.commands.prepare_worktree
+code_reviewer.commands.collect_github_context
 code_reviewer.commands.discover_transcripts
+code_reviewer.commands.publish_review
 code_reviewer.commands.cleanup_worktree
 ```
 
 `discover_transcripts` is a helper for the transcript-selection agent: it writes
-a readable candidate report plus normalized transcript files. Agent nodes handle
-canonical transcript selection, intent summarization, parallel review,
-aggregation, and publishing.
+a readable candidate report plus normalized transcript files. GitHub reads and
+writes are owned by deterministic Python steps: `collect_github_context` gathers
+PR comments, review comments, reviews, and files before agent review, while
+`publish_review` parses the aggregate output and posts the resulting top-level
+or inline comments. Agent nodes handle canonical transcript selection, intent
+summarization, parallel review, and aggregation; they should not call GitHub
+directly.
 
 ## Verification
 

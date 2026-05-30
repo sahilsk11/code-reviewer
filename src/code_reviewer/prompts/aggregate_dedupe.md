@@ -6,6 +6,9 @@ $ARGUMENTS
 Prepared worktree:
 $prepare_worktree.output
 
+Collected GitHub context:
+$collect_github_context.output
+
 Review brief:
 $summarize_intent.output
 
@@ -20,9 +23,9 @@ $reviewer_simplicity_alternatives.output
 
 Requirements:
 - Deduplicate findings across reviewers by root cause, not only by line.
-- Re-read prior comments, review threads, outdated flags, and replies from
-  GitHub before finalizing. Treat the review brief as a starting point, not
-  the final source of truth.
+- Use the collected GitHub context for prior comments, review threads,
+  outdated flags, replies, and controls. Do not call `gh`, the GitHub API, or
+  network tools from this node.
 - Suppress duplicate findings already posted as active unresolved comments
   for the current head/diff. Include them in skipped findings with reason
   `already_active_unresolved`.
@@ -50,28 +53,29 @@ Requirements:
 - Produce readable Markdown with summary, final findings, skipped findings,
   active prior blockers carried forward, stale-comment actions, and check
   conclusion.
-- End with exactly one fenced `json` block. The JSON object itself must be
-  the publish payload. Do not wrap it in `publish_payload`, `payload`,
-  `result`, or any other outer key.
-- The JSON object must include `blocking_count`, `non_blocking_count`,
-  `check_conclusion` (`success` or `failure`), and `findings` with stable
-  ids and `blocking` booleans. Findings should include `source`
-  (`new_finding` or `prior_active_comment`), `post_inline` boolean, and
-  `prior_comment_url` when carrying forward an existing comment.
-- Use this exact top-level shape:
+- End with exactly one fenced `json` block. The publisher will parse,
+  validate, and normalize this block before posting to GitHub.
+- The JSON object must include a `comments` list. Each comment must be either
+  `inline` for a specific diff location or `top_level` for a general PR
+  comment. Inline comments must include `path`, `line`, and `body`.
+- Include `blocking: true` on comments that should fail the review.
+- Use this top-level shape:
 
   ```json
   {
-    "blocking_count": 1,
-    "non_blocking_count": 2,
-    "check_conclusion": "failure",
-    "findings": [
+    "comments": [
       {
-        "id": "example-finding-id",
+        "type": "inline",
+        "path": "src/example.py",
+        "line": 42,
+        "body": "This path now skips the required permission check.",
         "blocking": true,
-        "source": "new_finding",
-        "post_inline": true,
-        "prior_comment_url": null
+        "source": "new_finding"
+      },
+      {
+        "type": "top_level",
+        "body": "Summary-only note for the PR.",
+        "blocking": false
       }
     ]
   }

@@ -11,6 +11,8 @@ $summarize_intent.output
 
 Requirements:
 - Review exactly the supplied head SHA, never a moving branch reference.
+- Do not call `gh`, the GitHub API, or network tools. GitHub context is already
+  summarized in the review brief.
 - Decide whether the implementation is the simplest good solution for the
   actual user intent.
 - Look for roundabout implementations, unnecessary machinery, premature

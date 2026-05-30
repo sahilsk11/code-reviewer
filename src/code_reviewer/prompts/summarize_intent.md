@@ -6,13 +6,16 @@ $ARGUMENTS
 Prepared worktree:
 $prepare_worktree.output
 
+Collected GitHub context:
+$collect_github_context.output
+
 Canonical implementation transcript:
 $find_implementation_transcript.output
 
-Gather the PR context you need directly using the GitHub CLI/API and the
-prepared worktree. Do not rely on a prebuilt artifact bundle.
+Use the collected GitHub context and prepared worktree. Do not call `gh`, the
+GitHub API, or network tools from this node.
 
-Required context to inspect:
+Required context to inspect from the supplied context:
 - PR title, body, commits, base/head SHAs, changed files, and diff overview.
 - Linked ticket if one is obvious from the branch name, PR body, commits,
   issue keys, or PR references.

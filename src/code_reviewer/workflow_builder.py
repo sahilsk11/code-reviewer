@@ -12,7 +12,12 @@ DEFAULT_ADDITIONAL_DIRECTORIES = (
     "/home/code-reviewer/wt",
     "/home/code-reviewer/.kanna",
 )
-BASH_NODE_IDS = ("prepare_worktree", "cleanup_worktree")
+BASH_NODE_IDS = (
+    "prepare_worktree",
+    "collect_github_context",
+    "publish_review",
+    "cleanup_worktree",
+)
 
 
 @dataclass(frozen=True)
@@ -31,11 +36,15 @@ class AgentNode:
 
 
 AGENT_NODES = (
-    AgentNode("find_implementation_transcript", "find_implementation_transcript.md"),
+    AgentNode(
+        "find_implementation_transcript",
+        "find_implementation_transcript.md",
+        ("collect_github_context",),
+    ),
     AgentNode(
         "summarize_intent",
         "summarize_intent.md",
-        ("prepare_worktree", "find_implementation_transcript"),
+        ("prepare_worktree", "collect_github_context", "find_implementation_transcript"),
     ),
     AgentNode(
         "reviewer_correctness_regressions",
@@ -56,12 +65,12 @@ AGENT_NODES = (
         "aggregate_dedupe",
         "aggregate_dedupe.md",
         (
+            "collect_github_context",
             "reviewer_correctness_regressions",
             "reviewer_design_layering_reuse",
             "reviewer_simplicity_alternatives",
         ),
     ),
-    AgentNode("publish_review", "publish_review.md", ("aggregate_dedupe",)),
 )
 
 
@@ -103,6 +112,12 @@ def render_workflow(config: WorkflowConfig) -> str:
             '        --payload-json "$ARGUMENTS" \\',
             '        --worktree-root "$HOME/wt"',
             "",
+            f"  - id: {BASH_NODE_IDS[1]}",
+            "    bash: |",
+            '      set -euo pipefail',
+            '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.collect_github_context \\',
+            '        --payload-json "$ARGUMENTS"',
+            "",
         ]
     )
 
@@ -111,17 +126,30 @@ def render_workflow(config: WorkflowConfig) -> str:
 
     lines.extend(
         [
-            f"  - id: {BASH_NODE_IDS[1]}",
+            f"  - id: {BASH_NODE_IDS[2]}",
             "    bash: |",
             '      set -euo pipefail',
             '      aggregate_output_file="$(mktemp)"',
             '      cat > "$aggregate_output_file" <<\'CODE_REVIEW_AGGREGATE_OUTPUT\'',
             "      $aggregate_dedupe.output",
             "      CODE_REVIEW_AGGREGATE_OUTPUT",
-            '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.finalize_review \\',
+            '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.publish_review \\',
+            '        --payload-json "$ARGUMENTS" \\',
+            '        --github-context "$collect_github_context.output" \\',
             '        --aggregate-output-file "$aggregate_output_file" \\',
             '        --worktree-manifest "$prepare_worktree.output"',
-            "    depends_on: [aggregate_dedupe, publish_review]",
+            "    depends_on:",
+            "      - collect_github_context",
+            "      - aggregate_dedupe",
+            "",
+            f"  - id: {BASH_NODE_IDS[3]}",
+            "    bash: |",
+            '      set -euo pipefail',
+            '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.cleanup_worktree \\',
+            '        --worktree-manifest "$prepare_worktree.output"',
+            "    depends_on:",
+            "      - prepare_worktree",
+            "      - publish_review",
             "    trigger_rule: all_done",
             "",
         ]
