@@ -19,7 +19,8 @@ def test_render_workflow_uses_configured_harness_model_and_prompt() -> None:
     assert "code_reviewer.commands.publish_review" in workflow
     assert "code_reviewer.commands.finalize_review" not in workflow
     assert "publish_review.md" not in workflow
-    assert "      - collect_github_context\n      - aggregate_dedupe" in workflow
+    assert "      trap 'rm -f \"$aggregate_output_file\"' EXIT" in workflow
+    assert "      - prepare_worktree\n      - collect_github_context\n      - aggregate_dedupe" in workflow
     assert "      - prepare_worktree\n      - publish_review" in workflow
 
 

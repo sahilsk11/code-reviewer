@@ -7,8 +7,9 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from code_reviewer.commands.common import (
+    gh_json,
     load_json_arg,
-    parse_pr_url,
+    resolve_repository_and_pr,
     run,
     sanitize_path_part,
     write_json,
@@ -24,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     payload = load_json_arg(args.payload_json)
-    repository, pr_number = repository_and_pr(payload)
+    repository, pr_number = resolve_repository_and_pr(payload)
 
     context = collect_context(repository=repository, pr_number=pr_number)
     context["payload"] = payload
@@ -38,21 +39,6 @@ def main(argv: list[str] | None = None) -> int:
     write_json(path, context)
     print(path)
     return 0
-
-
-def repository_and_pr(payload: dict[str, Any]) -> tuple[str, int]:
-    repository = payload.get("repository")
-    pr_number = payload.get("pull_request_number")
-    parsed_repository, parsed_number = parse_pr_url(
-        payload.get("pull_request_url") if isinstance(payload.get("pull_request_url"), str) else None
-    )
-    repository = repository or parsed_repository
-    pr_number = pr_number or parsed_number
-    if not isinstance(repository, str) or not repository:
-        raise SystemExit("Need repository or pull_request_url in review payload")
-    if not isinstance(pr_number, int):
-        raise SystemExit("Need pull_request_number or pull_request_url in review payload")
-    return repository, pr_number
 
 
 def collect_context(*, repository: str, pr_number: int) -> dict[str, Any]:
@@ -75,13 +61,6 @@ def collect_context(*, repository: str, pr_number: int) -> dict[str, Any]:
             ["api", f"repos/{repository}/pulls/{pr_number}/files", "--paginate", "--slurp"]
         ),
     }
-
-
-def gh_json(args: Sequence[str]) -> dict[str, Any]:
-    data = gh_json_value(args)
-    if not isinstance(data, dict):
-        raise SystemExit(f"gh returned non-object JSON for: gh {' '.join(args)}")
-    return data
 
 
 def gh_api_list(args: Sequence[str]) -> list[Any]:

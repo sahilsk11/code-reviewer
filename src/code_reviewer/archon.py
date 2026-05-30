@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
-from json import JSONDecodeError
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+from code_reviewer.commands.common import first_json_value
 
 
 @dataclass(frozen=True)
@@ -153,17 +153,20 @@ def extract_run_id(run: Mapping[str, Any]) -> str | None:
 
 
 def first_json_object(text: str) -> dict[str, Any]:
-    decoder = json.JSONDecoder()
     first: dict[str, Any] | None = None
-    for match in re.finditer(r"\{", text):
-        try:
-            data, _end = decoder.raw_decode(text[match.start() :])
-        except JSONDecodeError:
-            continue
+    remaining = text
+    while True:
+        data = first_json_value(remaining)
+        if data is None:
+            break
         if isinstance(data, dict):
             first = first or data
             if "runs" in data:
                 return data
+        next_start = remaining.find("{")
+        if next_start < 0:
+            break
+        remaining = remaining[next_start + 1 :]
     if first is not None:
         return first
     raise RuntimeError("archon output did not contain JSON")

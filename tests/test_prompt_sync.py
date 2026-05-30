@@ -41,3 +41,14 @@ def test_sync_prompts_dry_run_returns_braintrust_prompt_inputs(monkeypatch) -> N
     assert results[0].model
     assert results[0].metadata["workflow_node"] == "find_implementation_transcript"
     assert "archon" in results[0].tags
+
+
+def test_require_api_key_raises_when_missing(monkeypatch) -> None:
+    monkeypatch.delenv("BRAINTRUST_API_KEY", raising=False)
+
+    try:
+        prompt_sync.require_api_key()
+    except RuntimeError as exc:
+        assert "BRAINTRUST_API_KEY" in str(exc)
+    else:
+        raise AssertionError("expected missing BRAINTRUST_API_KEY to fail")

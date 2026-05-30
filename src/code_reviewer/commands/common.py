@@ -59,6 +59,43 @@ def gh_json(args: Sequence[str]) -> dict[str, Any]:
     return data
 
 
+def first_json_value(text: str) -> Any | None:
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
+        try:
+            data, _end = decoder.raw_decode(text[match.start() :])
+        except json.JSONDecodeError:
+            continue
+        return data
+    return None
+
+
+def resolve_repository_and_pr(
+    payload: dict[str, Any],
+    *,
+    context: dict[str, Any] | None = None,
+    manifest: dict[str, Any] | None = None,
+) -> tuple[str, int]:
+    context = context or {}
+    manifest = manifest or {}
+    repository = payload.get("repository") or context.get("repository") or manifest.get("repository")
+    pr_number = (
+        payload.get("pull_request_number")
+        or context.get("pr_number")
+        or manifest.get("pr_number")
+    )
+    parsed_repository, parsed_number = parse_pr_url(
+        payload.get("pull_request_url") if isinstance(payload.get("pull_request_url"), str) else None
+    )
+    repository = repository or parsed_repository
+    pr_number = pr_number or parsed_number
+    if not isinstance(repository, str) or not repository:
+        raise SystemExit("Need repository or pull_request_url")
+    if not isinstance(pr_number, int):
+        raise SystemExit("Need pull_request_number or pull_request_url")
+    return repository, pr_number
+
+
 def parse_pr_url(value: str | None) -> tuple[str | None, int | None]:
     if not value:
         return None, None

@@ -39,7 +39,6 @@ AGENT_NODES = (
     AgentNode(
         "find_implementation_transcript",
         "find_implementation_transcript.md",
-        ("collect_github_context",),
     ),
     AgentNode(
         "summarize_intent",
@@ -130,6 +129,7 @@ def render_workflow(config: WorkflowConfig) -> str:
             "    bash: |",
             '      set -euo pipefail',
             '      aggregate_output_file="$(mktemp)"',
+            '      trap \'rm -f "$aggregate_output_file"\' EXIT',
             '      cat > "$aggregate_output_file" <<\'CODE_REVIEW_AGGREGATE_OUTPUT\'',
             "      $aggregate_dedupe.output",
             "      CODE_REVIEW_AGGREGATE_OUTPUT",
@@ -139,6 +139,7 @@ def render_workflow(config: WorkflowConfig) -> str:
             '        --aggregate-output-file "$aggregate_output_file" \\',
             '        --worktree-manifest "$prepare_worktree.output"',
             "    depends_on:",
+            "      - prepare_worktree",
             "      - collect_github_context",
             "      - aggregate_dedupe",
             "",

@@ -7,7 +7,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from code_reviewer.commands.common import load_json_arg, parse_pr_url, read_json, run
+from code_reviewer.commands.common import (
+    first_json_value,
+    load_json_arg,
+    read_json,
+    resolve_repository_and_pr,
+    run,
+)
 
 
 JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(?P<body>.*?)\s*```", re.IGNORECASE | re.DOTALL)
@@ -28,7 +34,11 @@ def main(argv: list[str] | None = None) -> int:
     manifest = read_json(args.worktree_manifest)
     aggregate_output = args.aggregate_output_file.read_text(encoding="utf-8")
 
-    repository, pr_number = repository_and_pr(payload, context, manifest)
+    repository, pr_number = resolve_repository_and_pr(
+        payload,
+        context=context,
+        manifest=manifest,
+    )
     head_sha = str(
         payload.get("head_sha")
         or manifest.get("head_sha")
@@ -73,44 +83,14 @@ def main(argv: list[str] | None = None) -> int:
     return 1 if blocking_count else 0
 
 
-def repository_and_pr(
-    payload: dict[str, Any],
-    context: dict[str, Any],
-    manifest: dict[str, Any],
-) -> tuple[str, int]:
-    repository = payload.get("repository") or context.get("repository") or manifest.get("repository")
-    pr_number = payload.get("pull_request_number") or context.get("pr_number") or manifest.get("pr_number")
-    parsed_repository, parsed_number = parse_pr_url(
-        payload.get("pull_request_url") if isinstance(payload.get("pull_request_url"), str) else None
-    )
-    repository = repository or parsed_repository
-    pr_number = pr_number or parsed_number
-    if not isinstance(repository, str) or not repository:
-        raise SystemExit("Need repository or pull_request_url")
-    if not isinstance(pr_number, int):
-        raise SystemExit("Need pull_request_number or pull_request_url")
-    return repository, pr_number
-
-
 def extract_publish_payload(text: str) -> dict[str, Any]:
     candidates = [match.group("body") for match in JSON_FENCE_RE.finditer(text)]
     candidates.append(text)
     for candidate in reversed(candidates):
-        data = first_json_object(candidate)
+        data = first_json_value(candidate)
         if isinstance(data, dict) and ("comments" in data or "findings" in data):
             return data
     raise SystemExit("aggregate_dedupe output did not contain comments JSON")
-
-
-def first_json_object(text: str) -> Any:
-    decoder = json.JSONDecoder()
-    for match in re.finditer(r"\{", text):
-        try:
-            data, _end = decoder.raw_decode(text[match.start() :])
-        except json.JSONDecodeError:
-            continue
-        return data
-    return None
 
 
 def normalize_comments(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -147,12 +127,13 @@ def normalize_comments(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def count_blocking(comments: list[dict[str, Any]], payload: dict[str, Any]) -> int:
+    from_comments = sum(1 for comment in comments if comment.get("blocking") is True)
     explicit = payload.get("blocking_count")
     if isinstance(explicit, int):
-        return explicit
+        return max(explicit, from_comments)
     if isinstance(explicit, str) and explicit.isdigit():
-        return int(explicit)
-    return sum(1 for comment in comments if comment.get("blocking") is True)
+        return max(int(explicit), from_comments)
+    return from_comments
 
 
 def publish_comments(
