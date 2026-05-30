@@ -11,14 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from braintrust import Eval, Score
+from code_reviewer.env import braintrust_project, load_local_env
 
-PROJECT_NAME = "My Project"
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CASE_DIR = REPO_ROOT / "evals" / "real_pr_cases"
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_local_env(REPO_ROOT)
     parser = argparse.ArgumentParser(description="Braintrust eval for frozen real PR review cases.")
+    parser.add_argument("--project", default=braintrust_project())
     parser.add_argument("--model", default="gpt-5.3-codex-spark")
     parser.add_argument("--teacher-model", default="gpt-5.5")
     parser.add_argument("--judge-model", default="gpt-5.5")
@@ -38,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
             save_teacher(case, teacher_model=args.teacher_model)
 
     result = Eval(
-        PROJECT_NAME,
+        args.project,
         experiment_name=f"real-pr-review-v0-{slug(args.model)}",
         data=cases,
         task=lambda input: review_case(

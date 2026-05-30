@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Sequence
 from uuid import uuid4
 
+from code_reviewer import prompt_sync
 from code_reviewer.archon import ArchonClient, ArchonRun
+from code_reviewer.env import braintrust_project, load_local_env
 from code_reviewer.github_app_manifest import build_manifest, render_manifest
 from code_reviewer.run_store import ReviewRun, RunStore
 from code_reviewer.workflow_builder import (
@@ -22,7 +24,6 @@ from code_reviewer.workflow_builder import (
     write_workflow,
 )
 
-BRAINTRUST_PROJECT = "My Project"
 SENSITIVE_ARG_NAMES = {
     "--api-key",
     "--password",
@@ -33,6 +34,7 @@ SENSITIVE_ARG_NAMES = {
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    load_local_env()
     configure_braintrust(argv)
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -47,7 +49,7 @@ def configure_braintrust(argv: Sequence[str] | None = None) -> None:
         import braintrust
 
         braintrust.auto_instrument()
-        logger = braintrust.init_logger(project=BRAINTRUST_PROJECT)
+        logger = braintrust.init_logger(project=braintrust_project())
         logger.log(
             input={"argv": sanitize_argv(list(argv) if argv is not None else sys.argv[1:])},
             metadata={"service": "code-reviewer"},
@@ -175,6 +177,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
     path.set_defaults(func=cmd_workflow_path)
 
+    sync = subparsers.add_parser(
+        "sync-prompts",
+        help="Sync local prompt files to Braintrust as versioned Prompts.",
+    )
+    sync.add_argument(
+        "--project",
+        default=braintrust_project(),
+        help="Braintrust project name.",
+    )
+    sync.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show what would be synced without uploading.",
+    )
+    sync.set_defaults(func=cmd_sync_prompts)
+
     return parser
 
 
@@ -300,6 +318,17 @@ def cmd_control(args: argparse.Namespace) -> int:
 
 def cmd_workflow_path(_: argparse.Namespace) -> int:
     print(f"Generated workflows are written to .archon/workflows/{WORKFLOW_FILENAME}")
+    return 0
+
+
+def cmd_sync_prompts(args: argparse.Namespace) -> int:
+    results = prompt_sync.sync_prompts(
+        project_name=args.project,
+        dry_run=args.dry_run,
+    )
+    for result in results:
+        action = "Would sync" if result.dry_run else "Synced"
+        print(f"{action}: {result.slug}")
     return 0
 
 
