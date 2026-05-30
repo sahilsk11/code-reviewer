@@ -11,6 +11,8 @@ $summarize_intent.output
 
 Requirements:
 - Review exactly the supplied head SHA, never a moving branch reference.
+- Do not call `gh`, the GitHub API, or network tools. GitHub context is already
+  summarized in the review brief.
 - Trace affected code paths beyond the diff when needed to understand the
   actual runtime behavior.
 - Focus on concrete defects with high confidence: broken flows, edge cases,

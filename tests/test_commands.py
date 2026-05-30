@@ -4,7 +4,13 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
-from code_reviewer.commands import cleanup_worktree, discover_transcripts, finalize_review, prepare_worktree
+from code_reviewer.commands import (
+    cleanup_worktree,
+    collect_github_context,
+    discover_transcripts,
+    prepare_worktree,
+    publish_review,
+)
 
 
 def test_prepare_worktree_writes_manifest_without_dirtying_worktree(tmp_path: Path) -> None:
@@ -147,140 +153,270 @@ def test_cleanup_worktree_strips_archon_wrapping_quotes(tmp_path: Path) -> None:
     assert run.call_args_list[0].args[0][:3] == ["git", "worktree", "remove"]
 
 
-def test_finalize_review_fails_for_blocking_publish_payload(tmp_path: Path) -> None:
-    aggregate_output = """
-Summary
+def test_collect_github_context_writes_context_file(tmp_path: Path) -> None:
+    payload = {
+        "repository": "owner/repo",
+        "pull_request_number": 7,
+        "head_sha": "abc123",
+    }
+    context = {"pr": {"headRefOid": "abc123"}, "issue_comments": []}
 
-```json publish_payload
-{"blocking_count": 1, "non_blocking_count": 0, "check_conclusion": "failure", "findings": []}
-```
-"""
-
-    with patch.object(cleanup_worktree, "main", return_value=0) as cleanup:
-        result = finalize_review.main(
+    with patch.object(collect_github_context, "collect_context", return_value=context):
+        result = collect_github_context.main(
             [
-                "--aggregate-output",
-                aggregate_output,
-                "--worktree-manifest",
-                str(tmp_path / "manifest.json"),
-            ]
-        )
-
-    assert result == 1
-    cleanup.assert_called_once()
-
-
-def test_finalize_review_rejects_nested_publish_payload(tmp_path: Path) -> None:
-    aggregate_output = """
-```json
-{
-  "publish_payload": {
-    "blocking_count": 1,
-    "check_conclusion": "failure",
-    "findings": []
-  }
-}
-```
-"""
-
-    with patch.object(cleanup_worktree, "main", return_value=0):
-        result = finalize_review.main(
-            [
-                "--aggregate-output",
-                aggregate_output,
-                "--worktree-manifest",
-                str(tmp_path / "manifest.json"),
-            ]
-        )
-
-    assert result == 1
-
-
-def test_finalize_review_uses_blocking_count_for_check_result(tmp_path: Path) -> None:
-    aggregate_output = """
-```json publish_payload
-{"blocking_count": 0, "non_blocking_count": 0, "check_conclusion": "failure", "findings": []}
-```
-"""
-
-    with patch.object(cleanup_worktree, "main", return_value=0):
-        result = finalize_review.main(
-            [
-                "--aggregate-output",
-                aggregate_output,
-                "--worktree-manifest",
-                str(tmp_path / "manifest.json"),
+                "--payload-json",
+                json.dumps(payload),
+                "--output-root",
+                str(tmp_path),
             ]
         )
 
     assert result == 0
+    output = tmp_path / "owner-repo-pr-7-abc123.json"
+    written = json.loads(output.read_text(encoding="utf-8"))
+    assert written["repository"] == "owner/repo"
+    assert written["pr_number"] == 7
+    assert written["payload"] == payload
 
 
-def test_finalize_review_succeeds_without_blocking_findings(tmp_path: Path) -> None:
-    aggregate_output = """
-```json publish_payload
-{"blocking_count": 0, "non_blocking_count": 0, "check_conclusion": "success", "findings": []}
-```
-"""
-
-    with patch.object(cleanup_worktree, "main", return_value=0):
-        result = finalize_review.main(
-            [
-                "--aggregate-output",
-                aggregate_output,
-                "--worktree-manifest",
-                str(tmp_path / "manifest.json"),
-            ]
-        )
-
-    assert result == 0
+def test_collect_github_context_flattens_paginated_api_results() -> None:
+    with patch.object(collect_github_context, "gh_json_value", return_value=[[{"id": 1}], [{"id": 2}]]):
+        assert collect_github_context.gh_api_list(["api", "endpoint"]) == [{"id": 1}, {"id": 2}]
 
 
-def test_finalize_review_reads_publish_payload_from_file(tmp_path: Path) -> None:
+def test_publish_review_dry_run_returns_nonzero_for_blocking_comment(
+    tmp_path: Path,
+    capsys,
+) -> None:
     aggregate_output = tmp_path / "aggregate.md"
     aggregate_output.write_text(
         """
-```json publish_payload
-{"blocking_count": 1, "non_blocking_count": 0, "check_conclusion": "failure", "findings": []}
-```
-"""
-    )
+Review result.
 
-    with patch.object(cleanup_worktree, "main", return_value=0):
-        result = finalize_review.main(
+```json
+{
+  "comments": [
+    {
+      "type": "inline",
+      "path": "app.py",
+      "line": 12,
+      "body": "This breaks the fork path.",
+      "blocking": true
+    }
+  ]
+}
+```
+""",
+        encoding="utf-8",
+    )
+    context = tmp_path / "context.json"
+    context.write_text(json.dumps({"repository": "owner/repo", "pr_number": 7}), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "repository": "owner/repo",
+                "pr_number": 7,
+                "head_sha": "abc123",
+                "worktree_path": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "repository": "owner/repo",
+        "pull_request_number": 7,
+        "head_sha": "abc123",
+        "dry_run": True,
+    }
+
+    with patch.object(publish_review, "run") as run:
+        result = publish_review.main(
             [
+                "--payload-json",
+                json.dumps(payload),
+                "--github-context",
+                str(context),
                 "--aggregate-output-file",
                 str(aggregate_output),
                 "--worktree-manifest",
-                str(tmp_path / "manifest.json"),
+                str(manifest),
             ]
         )
 
     assert result == 1
+    run.assert_not_called()
+    output = json.loads(capsys.readouterr().out)
+    assert output["dry_run"] is True
+    assert output["blocking_count"] == 1
+    assert output["check_conclusion"] == "failure"
 
 
-def test_finalize_review_accepts_unfenced_publish_payload(tmp_path: Path) -> None:
-    aggregate_output = """
-Summary text with earlier braces like {not json}.
+def test_publish_review_does_not_let_top_level_count_mask_blocking_comment(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    aggregate_output = tmp_path / "aggregate.md"
+    aggregate_output.write_text(
+        json.dumps(
+            {
+                "blocking_count": 0,
+                "comments": [
+                    {
+                        "type": "top_level",
+                        "body": "Blocking summary.",
+                        "blocking": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    context = tmp_path / "context.json"
+    context.write_text(json.dumps({"repository": "owner/repo", "pr_number": 7}), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "repository": "owner/repo",
+                "pr_number": 7,
+                "head_sha": "abc123",
+                "worktree_path": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "repository": "owner/repo",
+        "pull_request_number": 7,
+        "head_sha": "abc123",
+        "dry_run": True,
+    }
 
-{
-  "blocking_count": 0,
-  "non_blocking_count": 1,
-  "check_conclusion": "success",
-  "findings": [
-    {"id": "n1", "blocking": false}
-  ]
-}
-"""
+    result = publish_review.main(
+        [
+            "--payload-json",
+            json.dumps(payload),
+            "--github-context",
+            str(context),
+            "--aggregate-output-file",
+            str(aggregate_output),
+            "--worktree-manifest",
+            str(manifest),
+        ]
+    )
 
-    with patch.object(cleanup_worktree, "main", return_value=0):
-        result = finalize_review.main(
+    assert result == 1
+    output = json.loads(capsys.readouterr().out)
+    assert output["blocking_count"] == 1
+
+
+def test_publish_review_rejects_malformed_aggregate_before_github_writes(
+    tmp_path: Path,
+) -> None:
+    aggregate_output = tmp_path / "aggregate.md"
+    aggregate_output.write_text("No structured comments here.", encoding="utf-8")
+    context = tmp_path / "context.json"
+    context.write_text(json.dumps({"repository": "owner/repo", "pr_number": 7}), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "repository": "owner/repo",
+                "pr_number": 7,
+                "head_sha": "abc123",
+                "worktree_path": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "repository": "owner/repo",
+        "pull_request_number": 7,
+        "head_sha": "abc123",
+    }
+
+    with patch.object(publish_review, "run") as run:
+        try:
+            publish_review.main(
+                [
+                    "--payload-json",
+                    json.dumps(payload),
+                    "--github-context",
+                    str(context),
+                    "--aggregate-output-file",
+                    str(aggregate_output),
+                    "--worktree-manifest",
+                    str(manifest),
+                ]
+            )
+        except SystemExit as exc:
+            assert "comments JSON" in str(exc)
+        else:
+            raise AssertionError("expected malformed aggregate to fail")
+
+    run.assert_not_called()
+
+
+def test_publish_review_posts_top_level_and_inline_comments(tmp_path: Path) -> None:
+    aggregate_output = tmp_path / "aggregate.md"
+    aggregate_output.write_text(
+        json.dumps(
+            {
+                "comments": [
+                    {
+                        "type": "top_level",
+                        "body": "Review summary.",
+                        "blocking": False,
+                    },
+                    {
+                        "type": "inline",
+                        "path": "app.py",
+                        "line": 12,
+                        "body": "Inline note.",
+                        "blocking": False,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    context = tmp_path / "context.json"
+    context.write_text(json.dumps({"repository": "owner/repo", "pr_number": 7}), encoding="utf-8")
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "repository": "owner/repo",
+                "pr_number": 7,
+                "head_sha": "abc123",
+                "worktree_path": str(tmp_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    payload = {
+        "repository": "owner/repo",
+        "pull_request_number": 7,
+        "head_sha": "abc123",
+    }
+
+    with patch.object(publish_review, "run") as run:
+        run.return_value.stdout = "ok\n"
+        result = publish_review.main(
             [
-                "--aggregate-output",
-                aggregate_output,
+                "--payload-json",
+                json.dumps(payload),
+                "--github-context",
+                str(context),
+                "--aggregate-output-file",
+                str(aggregate_output),
                 "--worktree-manifest",
-                str(tmp_path / "manifest.json"),
+                str(manifest),
             ]
         )
 
     assert result == 0
+    assert run.call_count == 2
+    assert run.call_args_list[0].args[0][:4] == ["gh", "pr", "comment", "7"]
+    assert run.call_args_list[1].args[0][:3] == ["gh", "api", "repos/owner/repo/pulls/7/comments"]

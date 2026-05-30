@@ -11,6 +11,8 @@ $summarize_intent.output
 
 Requirements:
 - Review exactly the supplied head SHA, never a moving branch reference.
+- Do not call `gh`, the GitHub API, or network tools. GitHub context is already
+  summarized in the review brief.
 - Explore the surrounding codebase when needed, not only the diff.
 - Check whether similar behavior, components, helpers, services, or provider
   abstractions already exist and should have been reused.
