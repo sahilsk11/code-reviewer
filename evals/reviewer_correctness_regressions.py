@@ -312,6 +312,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", default=braintrust_project())
     parser.add_argument("--model", default="gpt-5.3-codex-spark")
     parser.add_argument("--timeout", type=int, default=240)
+    parser.add_argument(
+        "--max-concurrency",
+        type=positive_int,
+        default=default_max_concurrency(),
+        help="Maximum number of eval cases to run at once.",
+    )
     args = parser.parse_args(argv)
 
     if not os.environ.get("BRAINTRUST_API_KEY"):
@@ -334,10 +340,21 @@ def main(argv: list[str] | None = None) -> int:
             "prompt_file": f"src/code_reviewer/prompts/{PROMPT_FILE}",
             "model": args.model,
         },
-        max_concurrency=1,
+        max_concurrency=args.max_concurrency,
     )
     print(result.summary)
     return 0
+
+
+def default_max_concurrency() -> int:
+    return positive_int(os.environ.get("CODEX_EVAL_MAX_CONCURRENCY", "1"))
+
+
+def positive_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
 
 
 def case_metadata(case: dict[str, Any], *, model: str) -> dict[str, Any]:

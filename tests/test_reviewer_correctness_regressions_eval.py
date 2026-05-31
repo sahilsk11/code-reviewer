@@ -198,6 +198,23 @@ def test_case_metadata_exposes_braintrust_filter_fields() -> None:
     }
 
 
+def test_max_concurrency_default_can_be_overridden_by_environment(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_EVAL_MAX_CONCURRENCY", "3")
+
+    assert eval_module.default_max_concurrency() == 3
+
+
+def test_positive_int_rejects_non_positive_values() -> None:
+    assert eval_module.positive_int("1") == 1
+
+    try:
+        eval_module.positive_int("0")
+    except Exception as exc:
+        assert "must be >= 1" in str(exc)
+    else:
+        raise AssertionError("expected positive_int to reject zero")
+
+
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],

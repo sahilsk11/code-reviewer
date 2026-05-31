@@ -48,6 +48,14 @@ If the user asks for a specific model or timeout, pass them through:
 $PYTHON evals/reviewer_correctness_regressions.py --model "$MODEL" --timeout "$TIMEOUT" 2>&1 | tee /tmp/code-reviewer-evals.log
 ```
 
+If the user asks to run cases in parallel, pass `--max-concurrency N` or set `CODEX_EVAL_MAX_CONCURRENCY=N`:
+
+```sh
+$PYTHON evals/reviewer_correctness_regressions.py --max-concurrency "$N" 2>&1 | tee /tmp/code-reviewer-evals.log
+```
+
+Default to `1` for reproducibility and to avoid surprise Codex/API pressure. Use small values like `2` or `3` first; each concurrent case starts its own repo checkout and `codex exec` run.
+
 ## Summarize Results
 
 Extract the Braintrust experiment URL when present:
