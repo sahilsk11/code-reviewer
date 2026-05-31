@@ -5,8 +5,8 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 from uuid import uuid4
 
 from code_reviewer import prompt_sync
@@ -353,9 +353,8 @@ def build_review_payload(
     dry_run: bool = False,
 ) -> dict[str, object]:
     pr = resolve_pr(pr_url) if not head_sha else {}
-    head_sha = head_sha or (
-        pr.get("headRefOid") if isinstance(pr.get("headRefOid"), str) else None
-    )
+    resolved_head_sha = pr.get("headRefOid")
+    head_sha = head_sha or (resolved_head_sha if isinstance(resolved_head_sha, str) else None)
     if not head_sha:
         raise SystemExit("Need --head-sha or a PR URL that GitHub CLI can resolve")
     parsed_repository, parsed_pr_number = parse_pr_url(pr_url)
@@ -381,8 +380,7 @@ def resolve_pr(pr_url: str | None) -> dict[str, object]:
             ["gh", "pr", "view", pr_url, "--json", "headRefOid"],
             check=True,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
         )
     except (FileNotFoundError, subprocess.CalledProcessError) as exc:
         raise SystemExit(f"Could not resolve PR head SHA from {pr_url}: {exc}") from exc

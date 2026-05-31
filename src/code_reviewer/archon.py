@@ -5,9 +5,10 @@ import os
 import subprocess
 import sys
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any
 
 from code_reviewer.commands.common import first_json_value
 
@@ -178,7 +179,7 @@ def extract_archon_run_id(output: str) -> str | None:
             continue
         try:
             data = json.loads(line)
-        except JSONDecodeError:
+        except json.JSONDecodeError:
             continue
         if isinstance(data, dict):
             value = data.get("workflowRunId")

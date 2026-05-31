@@ -1,9 +1,9 @@
 # GitHub App Setup
 
 This repository owns the GitHub App manifest and operator-facing setup contract.
-SAS owns the public webhook receiver and durable job queue. The existing
-GitHub Actions runner path remains the production review path until the worker
-and check-run publisher are implemented.
+SAS owns the public webhook receiver and durable job queue. This repository no
+longer ships a GitHub Actions workflow that runs AI reviews; the bundled Actions
+workflow is limited to Python verification.
 
 ## Generate The Manifest
 
@@ -25,9 +25,7 @@ The manifest subscribes only to `pull_request` events. It requests:
 - `pull_requests: write` so later publishers can create review comments.
 - `checks: write` so later publishers can create and update the required check.
 
-These permissions are reserved for the app-owned worker path. The current
-GitHub Actions workflow still owns review execution and the `AI Code Review`
-check result.
+These permissions are reserved for the app-owned worker path.
 
 ## Create And Install The App
 
@@ -103,9 +101,7 @@ and enqueue code-review jobs for `opened`, `reopened`, `synchronize`, and
 ## Check-Run Publishing Contract
 
 The later publisher should use the app installation token to create or update a
-check run named `AI Code Review` for the exact PR head SHA being reviewed. Until
-that publisher exists, repositories should keep the existing GitHub Actions
-workflow and branch protection configuration in place.
+check run named `AI Code Review` for the exact PR head SHA being reviewed.
 
 ## Deferred Pieces
 
@@ -113,4 +109,4 @@ workflow and branch protection configuration in place.
 - Installation-token minting.
 - Repository checkout orchestration from queued webhook jobs.
 - App-owned publishing of summary comments, inline comments, and check runs.
-- Migration from the Actions-required check to the app-owned required check.
+- App-owned publishing of the required check result.

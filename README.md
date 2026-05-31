@@ -29,7 +29,7 @@ Install the bundled workflow into the current repo:
 code-review install-workflow
 ```
 
-Run a review from GitHub Actions:
+Run a review from an exact checked-out PR head:
 
 ```sh
 code-review review \
@@ -91,29 +91,19 @@ code-review github-app manifest \
   --webhook-url https://sas.example.com/github-code-review-app
 ```
 
-The manifest is documented in [docs/github-app.md](docs/github-app.md). It does
-not replace the GitHub Actions runner path yet; keep the Actions workflow and
-required `AI Code Review` check in place until the app worker and app-owned
-check-run publisher are complete.
+The manifest is documented in [docs/github-app.md](docs/github-app.md). The
+repository CI does not run AI reviews; it only verifies the Python codebase.
 
 ## GitHub Actions
 
-Copy `.github/workflows/ai-code-review.yml` into a target repo and update the
-package install source if needed.
+The bundled `.github/workflows/ci.yml` workflow verifies this Python package on
+pull requests and pushes to `main`. It runs Ruff, Pyright, and pytest on a
+GitHub-hosted runner. It does not invoke `code-review review`, Archon, Codex, or
+the self-hosted AI review runner.
 
-The workflow targets a trusted self-hosted GitHub Actions runner labeled
-`code-reviewer` and only runs for same-repository pull requests from trusted
-authors. The required `AI Code Review` check is enforced by a separate
-GitHub-hosted job so skipped self-hosted jobs cannot pass branch protection.
-The runner service user is expected to be `code-reviewer`; Archon, Codex, and
-GitHub CLI must be available on `PATH`, with Codex authenticated for that user.
-The job exports
-`CODEX_BIN_PATH` from the runner's `codex` binary for Archon, and installs
-lightweight review tooling so reviewer agents can reproduce common Python
-verification commands.
-
-The required check should be named `AI Code Review`. Configure branch protection
-to require that check once the workflow is installed in the target repository.
+Before merging this workflow replacement, update branch protection rules that
+previously required `AI Code Review`. Configure branch protection against the
+`Python Checks` job if this repository needs a required CI check.
 
 ## Workflow And State
 
@@ -152,6 +142,8 @@ directly.
 ## Verification
 
 ```sh
+make checks
+python -m ruff check .
+python -m pyright
 python -m pytest
-python -m compileall src
 ```

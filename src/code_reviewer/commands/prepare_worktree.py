@@ -4,6 +4,7 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
+from typing import Any
 
 from code_reviewer.commands.common import (
     gh_json,
@@ -69,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def resolve_pr(pr_url: object, repository: object, pr_number: object) -> dict[str, object]:
+def resolve_pr(pr_url: object, repository: object, pr_number: object) -> dict[str, Any]:
     fields = (
         "url,number,title,headRefOid,baseRefOid,headRepository,"
         "headRefName,baseRefName,state,isDraft"

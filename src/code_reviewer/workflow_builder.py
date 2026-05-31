@@ -8,10 +8,7 @@ WORKFLOW_NAME = "ai-code-review"
 WORKFLOW_FILENAME = f"{WORKFLOW_NAME}.yaml"
 DEFAULT_HARNESS = "opencode"
 DEFAULT_MODEL = "opencode-go/deepseek-v4-pro"
-DEFAULT_ADDITIONAL_DIRECTORIES = (
-    "/home/code-reviewer/wt",
-    "/home/code-reviewer/.kanna",
-)
+DEFAULT_ADDITIONAL_DIRECTORIES: tuple[str, ...] = ()
 BASH_NODE_IDS = (
     "prepare_worktree",
     "collect_github_context",
@@ -95,8 +92,7 @@ def render_workflow(config: WorkflowConfig) -> str:
     ]
     if config.additional_directories:
         lines.append("additionalDirectories:")
-        for directory in config.additional_directories:
-            lines.append(f"  - {directory}")
+        lines.extend(f"  - {directory}" for directory in config.additional_directories)
     lines.extend(
         [
             "worktree:",
@@ -176,8 +172,7 @@ def render_agent_node(node: AgentNode, model: str) -> list[str]:
             lines.append(f"    depends_on: [{node.depends_on[0]}]")
         else:
             lines.append("    depends_on:")
-            for dependency in node.depends_on:
-                lines.append(f"      - {dependency}")
+            lines.extend(f"      - {dependency}" for dependency in node.depends_on)
     lines.append("")
     return lines
 
