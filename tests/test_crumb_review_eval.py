@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
+from evals import crumb_review_v0
 from evals.crumb_review_v0 import (
+    EvalInfrastructureError,
     expected_files_present,
     expected_terms_present,
     forbidden_terms_absent,
@@ -11,6 +14,8 @@ from evals.crumb_review_v0 import (
     materialize_case,
     no_findings_when_expected,
     render_crumb_prompt,
+    run_codex_prompt,
+    run_crumb_case,
 )
 
 
@@ -93,6 +98,24 @@ def test_render_crumb_prompt_substitutes_archon_context(tmp_path: Path) -> None:
     assert materialized.head_sha in prompt
 
 
+def test_render_crumb_prompt_does_not_substitute_inside_values(tmp_path: Path) -> None:
+    case = {
+        "name": "sample",
+        "crumb_id": "reviewer_correctness_regressions",
+        "input": {"repository": "eval/$prepare_worktree.output"},
+        "repo": {
+            "base_files": {"app.py": "def value():\n    return 1\n"},
+            "changed_files": {"app.py": "def value():\n    return 2\n"},
+        },
+    }
+    materialized = materialize_case(case, tmp_path)
+
+    prompt = render_crumb_prompt("reviewer_correctness_regressions", materialized)
+
+    assert '"repository": "eval/$prepare_worktree.output"' in prompt
+    assert str(materialized.manifest_path) in prompt
+
+
 def test_scoring_helpers_measure_terms_files_and_forbidden_noise() -> None:
     output = {
         "markdown": (
@@ -117,3 +140,66 @@ def test_no_findings_score_accepts_clean_review_output() -> None:
     score = no_findings_when_expected({}, output, {"no_findings": True})
 
     assert score.score == 1.0
+
+
+def test_no_findings_score_ignores_format_echo_without_finding_block() -> None:
+    output = {
+        "markdown": (
+            "No regressions detected.\n\n"
+            "If there were findings, they would include `source: new_finding` "
+            "and `blocking: true`."
+        )
+    }
+
+    score = no_findings_when_expected({}, output, {"no_findings": True})
+
+    assert score.score == 1.0
+
+
+def test_no_findings_score_rejects_actual_finding_block() -> None:
+    output = {
+        "markdown": (
+            "Finding:\n"
+            "severity: medium\n"
+            "blocking: true\n"
+            "source: new_finding\n"
+        )
+    }
+
+    score = no_findings_when_expected({}, output, {"no_findings": True})
+
+    assert score.score == 0.0
+
+
+def test_run_codex_prompt_returns_scored_timeout(monkeypatch, tmp_path: Path) -> None:
+    def timeout_run(*args, **kwargs):
+        raise subprocess.TimeoutExpired(args[0], timeout=1, stderr="timed out")
+
+    monkeypatch.setattr(crumb_review_v0.subprocess, "run", timeout_run)
+
+    markdown, completed = run_codex_prompt("prompt", cwd=tmp_path, model="model", timeout=1)
+
+    assert markdown == ""
+    assert completed.returncode == 124
+    assert "timed out" in completed.stderr
+
+
+def test_run_crumb_case_returns_scored_infrastructure_failure(monkeypatch) -> None:
+    def fail_materialize(*args, **kwargs):
+        raise EvalInfrastructureError("git failed", stderr="fatal: no git")
+
+    monkeypatch.setattr(crumb_review_v0, "materialize_case", fail_materialize)
+
+    result = run_crumb_case(
+        {
+            "name": "sample",
+            "crumb_id": "reviewer_correctness_regressions",
+            "repo": {"base_files": {}, "changed_files": {}},
+        },
+        model="model",
+        timeout=1,
+    )
+
+    assert result["returncode"] == 1
+    assert result["error"] == "git failed"
+    assert result["stderr_tail"] == "fatal: no git"

@@ -38,6 +38,12 @@ class MaterializedCase:
     head_sha: str
 
 
+class EvalInfrastructureError(RuntimeError):
+    def __init__(self, message: str, *, stderr: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
+
+
 def main(argv: list[str] | None = None) -> int:
     load_local_env(REPO_ROOT)
     parser = argparse.ArgumentParser(
@@ -153,14 +159,21 @@ def run_crumb_case(
 ) -> dict[str, Any]:
     temp_dir = Path(tempfile.mkdtemp(prefix=f"crumb-review-{slug(input['name'])}-"))
     try:
-        materialized = materialize_case(input, temp_dir)
-        prompt = render_crumb_prompt(input["crumb_id"], materialized)
-        markdown, completed = run_codex_prompt(
-            prompt,
-            cwd=materialized.repo_path,
-            model=model,
-            timeout=timeout,
-        )
+        try:
+            materialized = materialize_case(input, temp_dir)
+            prompt = render_crumb_prompt(input["crumb_id"], materialized)
+            markdown, completed = run_codex_prompt(
+                prompt,
+                cwd=materialized.repo_path,
+                model=model,
+                timeout=timeout,
+            )
+        except EvalInfrastructureError as exc:
+            return infrastructure_failure_result(
+                exc,
+                keep_worktrees=keep_worktrees,
+                temp_dir=temp_dir,
+            )
         result = {
             "returncode": completed.returncode,
             "stderr_tail": completed.stderr[-2000:],
@@ -308,9 +321,10 @@ def render_crumb_prompt(crumb_id: str, materialized: MaterializedCase) -> str:
         "$prepare_worktree.output": str(materialized.manifest_path),
         "$summarize_intent.output": materialized.summarize_intent_output,
     }
-    for token, value in replacements.items():
-        prompt = prompt.replace(token, value)
-    return prompt
+    pattern = re.compile(
+        "|".join(re.escape(token) for token in sorted(replacements, key=len, reverse=True))
+    )
+    return pattern.sub(lambda match: replacements[match.group(0)], prompt)
 
 
 def run_codex_prompt(
@@ -335,16 +349,26 @@ def run_codex_prompt(
             model,
             "-",
         ]
-        completed = subprocess.run(
-            command,
-            input=prompt,
-            cwd=cwd,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                input=prompt,
+                cwd=cwd,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired as exc:
+            markdown = Path(output_file.name).read_text(encoding="utf-8").strip()
+            stderr = timeout_output(exc.stderr) or str(exc)
+            return markdown, subprocess.CompletedProcess(
+                command,
+                returncode=124,
+                stdout=timeout_output(exc.output),
+                stderr=stderr,
+            )
         markdown = Path(output_file.name).read_text(encoding="utf-8").strip()
     return markdown, completed
 
@@ -414,13 +438,13 @@ def no_findings_when_expected(
         "no blocking findings",
         "no high-confidence findings",
         "no issues found",
+        "no regressions detected",
     )
-    finding_signals = ("source: new_finding", "blocking: true", "severity:")
     has_negative_signal = any(signal in text for signal in negative_signals)
-    has_finding_signal = any(signal in text for signal in finding_signals)
+    has_finding_signal = has_finding_block_signal(output.get("markdown", ""))
     return Score(
         name="no_findings_when_expected",
-        score=1.0 if has_negative_signal and not has_finding_signal else 0.0,
+        score=1.0 if not has_finding_signal else 0.0,
         metadata={
             "has_negative_signal": has_negative_signal,
             "has_finding_signal": has_finding_signal,
@@ -432,15 +456,59 @@ def searchable_output(output: dict[str, Any]) -> str:
     return str(output.get("markdown", "")).lower()
 
 
+def has_finding_block_signal(markdown: object) -> bool:
+    text = str(markdown)
+    patterns = (
+        r"(?im)^\s*(?:[-*]\s*)?source\s*:\s*(?:`)?new_finding(?:`)?\s*$",
+        r"(?im)^\s*(?:[-*]\s*)?blocking\s*:\s*(?:`)?true(?:`)?\s*$",
+        r"(?im)^\s*(?:[-*]\s*)?severity\s*:\s*(?:`)?(?:low|medium|high)(?:`)?\s*$",
+    )
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def infrastructure_failure_result(
+    exc: EvalInfrastructureError,
+    *,
+    keep_worktrees: bool,
+    temp_dir: Path,
+) -> dict[str, Any]:
+    return {
+        "returncode": 1,
+        "stderr_tail": exc.stderr[-2000:],
+        "markdown": "",
+        "worktree_path": str(temp_dir) if keep_worktrees else None,
+        "diff": "",
+        "diff_stat": "",
+        "base_sha": None,
+        "head_sha": None,
+        "error": str(exc),
+    }
+
+
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    completed = subprocess.run(
         ["git", *args],
         cwd=cwd,
-        check=True,
+        check=False,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+    if completed.returncode != 0:
+        command = " ".join(["git", *args])
+        raise EvalInfrastructureError(
+            f"{command} failed with exit code {completed.returncode}",
+            stderr=completed.stderr,
+        )
+    return completed
+
+
+def timeout_output(value: object) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def slug(value: str) -> str:
