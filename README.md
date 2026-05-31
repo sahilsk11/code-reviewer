@@ -147,3 +147,25 @@ python -m ruff check .
 python -m pyright
 python -m pytest
 ```
+
+## Evals
+
+Run the focused prompt-crumb eval against local git fixtures:
+
+```sh
+BRAINTRUST_API_KEY=... python evals/crumb_review_v0.py \
+  --crumb-id reviewer_correctness_regressions
+```
+
+The eval materializes each case in `evals/crumb_cases/` as a temporary git repo,
+commits a base and head revision, substitutes Archon-style context into the
+selected prompt crumb, runs the prompt with `codex exec`, and scores the model
+output for expected finding terms, file references, forbidden noise, and clean
+no-finding cases.
+
+To verify fixture materialization and prompt rendering without Braintrust or a
+model call:
+
+```sh
+python evals/crumb_review_v0.py --render-only
+```
