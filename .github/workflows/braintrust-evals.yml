@@ -1,0 +1,90 @@
+name: Braintrust Evals
+
+on:
+  workflow_dispatch:
+    inputs:
+      paths:
+        description: "Eval file path(s) to run"
+        required: true
+        default: "evals/reviewer_correctness_regressions.py"
+      model:
+        description: "Codex model passed to the eval"
+        required: true
+        default: "gpt-5.3-codex-spark"
+      timeout:
+        description: "Per-case timeout in seconds"
+        required: true
+        default: "240"
+  pull_request:
+    paths:
+      - ".github/workflows/braintrust-evals.yml"
+      - "evals/**"
+      - "src/code_reviewer/prompts/**"
+      - "src/code_reviewer/workflow_builder.py"
+      - "src/code_reviewer/env.py"
+  push:
+    branches: ["main"]
+    paths:
+      - ".github/workflows/braintrust-evals.yml"
+      - "evals/**"
+      - "src/code_reviewer/prompts/**"
+      - "src/code_reviewer/workflow_builder.py"
+      - "src/code_reviewer/env.py"
+
+concurrency:
+  group: braintrust-evals-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  reviewer-correctness-regressions:
+    name: Reviewer correctness/regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      BRAINTRUST_RUN_EVAL: "1"
+      CODEX_EVAL_MODEL: ${{ github.event.inputs.model || 'gpt-5.3-codex-spark' }}
+      CODEX_EVAL_TIMEOUT: ${{ github.event.inputs.timeout || '240' }}
+      BRAINTRUST_EVAL_PATHS: ${{ github.event.inputs.paths || 'evals/reviewer_correctness_regressions.py' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install package and Codex CLI
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+          npm install -g @openai/codex
+          codex --version
+
+      - name: Run Braintrust evals
+        uses: braintrustdata/eval-action@v1
+        with:
+          api_key: ${{ secrets.BRAINTRUST_API_KEY }}
+          runtime: python
+          package_manager: pip
+          paths: ${{ env.BRAINTRUST_EVAL_PATHS }}
+          use_proxy: false
+        env:
+          BRAINTRUST_API_KEY: ${{ secrets.BRAINTRUST_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          BRAINTRUST_RUN_EVAL: "1"
+          CODEX_EVAL_MODEL: ${{ env.CODEX_EVAL_MODEL }}
+          CODEX_EVAL_TIMEOUT: ${{ env.CODEX_EVAL_TIMEOUT }}

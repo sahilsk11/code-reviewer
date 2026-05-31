@@ -84,6 +84,22 @@ def test_scores_are_minimal_shape_checks() -> None:
     assert shape.score == 1.0
 
 
+def test_eval_data_exposes_case_metadata() -> None:
+    rows = eval_module.eval_data()
+
+    assert rows
+    assert rows[0]["input"]["name"] == "friday-narrator-final-recovery"
+    assert rows[0]["metadata"]["prompt_node"] == "reviewer_correctness_regressions"
+
+
+def test_defaults_can_be_overridden_by_ci_environment(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_EVAL_MODEL", "model-from-env")
+    monkeypatch.setenv("CODEX_EVAL_TIMEOUT", "12")
+
+    assert eval_module.default_model() == "model-from-env"
+    assert eval_module.default_timeout() == 12
+
+
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
