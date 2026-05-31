@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+# ruff: noqa: E402,I001
+
 import argparse
 import json
 import os
@@ -256,8 +258,7 @@ def run_codex_prompt(
             input=prompt,
             cwd=cwd,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=timeout,
             check=False,
         )
@@ -311,8 +312,7 @@ def run(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedP
         cwd=cwd,
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
 
 
