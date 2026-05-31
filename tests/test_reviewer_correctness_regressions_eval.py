@@ -126,6 +126,55 @@ def test_code_reviewer_case_captures_validated_pr8_regression() -> None:
     assert ["count_blocking"] in case["must_notice_terms"]
 
 
+def test_recent_validated_cases_capture_source_prs_and_terms() -> None:
+    expected = {
+        "sas-deploy-planner-missing-deployments-role": {
+            "source_pr": "https://github.com/sahilsk11/sas/pull/149",
+            "head_sha": "88c8918d425fe464b39e975481790fd9787ea941",
+            "term": "deployments",
+            "grade": "valid",
+        },
+        "sas-prefect-control-plane-tags-drift": {
+            "source_pr": "https://github.com/sahilsk11/sas/pull/150",
+            "head_sha": "8cef5a8c666b4edd70413f33fa268c4728921acf",
+            "term": "CONTROL_PLANE_TAGS",
+            "grade": "valid",
+        },
+        "sas-prefect-work-pool-create-failure": {
+            "source_pr": "https://github.com/sahilsk11/sas/pull/150",
+            "head_sha": "8cef5a8c666b4edd70413f33fa268c4728921acf",
+            "term": "work pool",
+            "grade": "partial",
+        },
+        "code-reviewer-braintrust-configure-crash": {
+            "source_pr": "https://github.com/sahilsk11/code-reviewer/pull/2",
+            "head_sha": "abca301c6b4927be21456fe6ee2cb3a50485dafd",
+            "term": "configure_braintrust",
+            "grade": "valid",
+        },
+        "kanna-opencode-concurrent-server-startup": {
+            "source_pr": "https://github.com/sahilsk11/kanna/pull/17",
+            "head_sha": "df59d72931d07e4e7288d986fed0571088f921fa",
+            "term": "OpenCode",
+            "grade": "valid",
+        },
+    }
+    cases = {case["name"]: case for case in eval_module.CASES}
+
+    for name, fields in expected.items():
+        case = cases[name]
+        assert case["source_pr"] == fields["source_pr"]
+        assert case["head_sha"] == fields["head_sha"]
+        assert case["validated_comments"][0]["grade"] == fields["grade"]
+        assert any(fields["term"] in terms for terms in case["must_notice_terms"])
+
+
+def test_all_cases_have_known_issue_terms() -> None:
+    for case in eval_module.CASES:
+        assert case["must_notice_terms"], case["name"]
+        assert all(isinstance(terms, list) and terms for terms in case["must_notice_terms"])
+
+
 def test_case_metadata_exposes_braintrust_filter_fields() -> None:
     case = next(
         case
