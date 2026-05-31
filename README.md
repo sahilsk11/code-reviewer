@@ -150,22 +150,14 @@ python -m pytest
 
 ## Evals
 
-Run the focused prompt-crumb eval against local git fixtures:
+Run the Braintrust eval for the correctness/regressions reviewer prompt:
 
 ```sh
-BRAINTRUST_API_KEY=... python evals/crumb_review_v0.py \
-  --crumb-id reviewer_correctness_regressions
+BRAINTRUST_API_KEY=... python evals/reviewer_correctness_regressions.py
 ```
 
-The eval materializes each case in `evals/crumb_cases/` as a temporary git repo,
-commits a base and head revision, substitutes Archon-style context into the
-selected prompt crumb, runs the prompt with `codex exec`, and scores the model
-output for expected finding terms, file references, forbidden noise, and clean
-no-finding cases.
-
-To verify fixture materialization and prompt rendering without Braintrust or a
-model call:
-
-```sh
-python evals/crumb_review_v0.py --render-only
-```
+Cases are plain Python dictionaries in that file. Each case names a real repo
+plus immutable base/head commits. The eval clones the repo into a temporary
+checkout, renders `reviewer_correctness_regressions.md` with minimal
+Archon-style context, runs `codex exec` locally, and uploads the local task
+output plus lightweight Python scores to Braintrust.
