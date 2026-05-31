@@ -36,7 +36,57 @@ CASES: list[dict[str, Any]] = [
             "Removes legacy final recovery paths and moves provider-final "
             "handling toward explicit turn ownership."
         ),
-    }
+        "must_notice_terms": [
+            ["recover_missing_final", "missing final"],
+            ["events", "poll"],
+            ["recovery"],
+        ],
+    },
+    {
+        "name": "code-reviewer-publish-blocking-count-override",
+        "repo": "https://github.com/sahilsk11/code-reviewer.git",
+        "base_sha": "69c41ee0a1350dfa09818bce929eec5fdc06d758",
+        "head_sha": "b19ebf5093a7c82f04b980c2f332247a978232c8",
+        "source_pr": "https://github.com/sahilsk11/code-reviewer/pull/8",
+        "title": "Move review publication into deterministic commands",
+        "body": (
+            "Adds deterministic GitHub context collection, replaces the publish "
+            "agent with a Python publisher, and rewires cleanup around the "
+            "managed review worktree."
+        ),
+        "validated_comments": [
+            {
+                "grade": "partial",
+                "url": "https://github.com/sahilsk11/code-reviewer/pull/8#issuecomment-4584991993",
+                "body": (
+                    "`count_blocking` gives priority to a top-level "
+                    "`blocking_count` over per-comment `blocking: true`, so a "
+                    "payload with `blocking_count: 0` can silently ignore a "
+                    "blocking comment."
+                ),
+            }
+        ],
+        "must_notice": [
+            (
+                "count_blocking can undercount blocking comments when the "
+                "payload also includes a stale or contradictory blocking_count"
+            ),
+            (
+                "the publisher can treat a review containing blocking comments "
+                "as non-blocking if blocking_count is 0"
+            ),
+        ],
+        "must_notice_terms": [
+            ["count_blocking"],
+            ["blocking_count"],
+            ["blocking: true", "blocking true", "per-comment"],
+            ["mask", "override", "undercount", "ignore", "non-blocking"],
+        ],
+        "avoid": [
+            "treating the issue as only style or cleanup",
+            "requiring the agent output to match the original review wording",
+        ],
+    },
 ]
 
 
@@ -59,18 +109,12 @@ def main(argv: list[str] | None = None) -> int:
         data=[
             {
                 "input": case,
-                "metadata": {
-                    "case": case["name"],
-                    "repo": case["repo"],
-                    "base_sha": case["base_sha"],
-                    "head_sha": case["head_sha"],
-                    "prompt_node": PROMPT_NODE,
-                },
+                "metadata": case_metadata(case, model=args.model),
             }
             for case in CASES
         ],
         task=lambda input: run_case(input, model=args.model, timeout=args.timeout),
-        scores=[completed, output_present, finding_shape_present],
+        scores=[completed, output_present, known_issue_present],
         metadata={
             "runner": "evals/reviewer_correctness_regressions.py",
             "prompt_file": f"src/code_reviewer/prompts/{PROMPT_FILE}",
@@ -80,6 +124,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(result.summary)
     return 0
+
+
+def case_metadata(case: dict[str, Any], *, model: str) -> dict[str, Any]:
+    return {
+        "eval_case": case["name"],
+        "case": case["name"],
+        "case_kind": "validated_pr" if case.get("source_pr") else "curated_pr",
+        "repo": case["repo"],
+        "source_pr": case.get("source_pr"),
+        "base_sha": case["base_sha"],
+        "head_sha": case["head_sha"],
+        "model": model,
+        "prompt_node": PROMPT_NODE,
+        "prompt_file": f"src/code_reviewer/prompts/{PROMPT_FILE}",
+    }
 
 
 def run_case(case: dict[str, Any], *, model: str, timeout: int) -> dict[str, Any]:
@@ -283,23 +342,34 @@ def output_present(
     )
 
 
-def finding_shape_present(
+def known_issue_present(
     input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
 ) -> Score:
-    markdown = str(output.get("markdown") or "")
-    labels = ("file", "severity", "blocking", "confidence", "source")
-    found = [label for label in labels if re_search_label(markdown, label)]
+    term_groups = input.get("must_notice_terms") or []
+    if not term_groups:
+        return Score(name="known_issue_present", score=None)
+
+    markdown = normalize_text(str(output.get("markdown") or ""))
+    matched = []
+    missing = []
+    for terms in term_groups:
+        normalized_terms = [normalize_text(str(term)) for term in terms]
+        if any(term in markdown for term in normalized_terms):
+            matched.append(terms)
+        else:
+            missing.append(terms)
+
     return Score(
-        name="finding_shape_present",
-        score=len(found) / len(labels),
-        metadata={"found": found, "missing": [label for label in labels if label not in found]},
+        name="known_issue_present",
+        score=len(matched) / len(term_groups),
+        metadata={"matched": matched, "missing": missing},
     )
 
 
-def re_search_label(markdown: str, label: str) -> bool:
+def normalize_text(text: str) -> str:
     import re
 
-    return re.search(rf"(?im)^\s*(?:[-*]\s*)?{label}\s*:", markdown) is not None
+    return re.sub(r"\s+", " ", text.casefold()).strip()
 
 
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
