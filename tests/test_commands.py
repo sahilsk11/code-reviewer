@@ -184,7 +184,7 @@ def test_collect_github_context_flattens_paginated_api_results() -> None:
         assert collect_github_context.gh_api_list(["api", "endpoint"]) == [{"id": 1}, {"id": 2}]
 
 
-def test_publish_review_dry_run_returns_nonzero_for_blocking_comment(
+def test_publish_review_dry_run_reports_blocking_comment_without_failing(
     tmp_path: Path,
     capsys,
 ) -> None:
@@ -244,7 +244,7 @@ Review result.
             ]
         )
 
-    assert result == 1
+    assert result == 0
     run.assert_not_called()
     output = json.loads(capsys.readouterr().out)
     assert output["dry_run"] is True
@@ -306,7 +306,7 @@ def test_publish_review_does_not_let_top_level_count_mask_blocking_comment(
         ]
     )
 
-    assert result == 1
+    assert result == 0
     output = json.loads(capsys.readouterr().out)
     assert output["blocking_count"] == 1
 
