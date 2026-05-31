@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,9 @@ from code_reviewer.workflow_builder import read_prompt
 PROMPT_FILE = "reviewer_correctness_regressions.md"
 PROMPT_NODE = "reviewer_correctness_regressions"
 
+# `must_notice` and `avoid_notes` are human-readable case notes. Scoring uses
+# the structured `must_notice_terms`, optional `must_cite_terms`, and optional
+# `avoid_output_terms` fields.
 CASES: list[dict[str, Any]] = [
     {
         "name": "friday-narrator-final-recovery",
@@ -82,9 +86,223 @@ CASES: list[dict[str, Any]] = [
             ["blocking: true", "blocking true", "per-comment"],
             ["mask", "override", "undercount", "ignore", "non-blocking"],
         ],
-        "avoid": [
+        "avoid_notes": [
             "treating the issue as only style or cleanup",
             "requiring the agent output to match the original review wording",
+        ],
+    },
+    {
+        "name": "sas-deploy-planner-missing-deployments-role",
+        "repo": "https://github.com/sahilsk11/sas.git",
+        "base_sha": "f5d18b11836e091e36df7dc87c5d2fb2ae4ba753",
+        "head_sha": "88c8918d425fe464b39e975481790fd9787ea941",
+        "source_pr": "https://github.com/sahilsk11/sas/pull/149",
+        "title": "Move SAS deploys to self-hosted Prefect flow",
+        "body": (
+            "Moves SAS deploys onto a self-hosted runner and adds deploy "
+            "planning/flow commands for Prefect-backed execution."
+        ),
+        "validated_comments": [
+            {
+                "grade": "valid",
+                "url": "https://github.com/sahilsk11/sas/pull/149#issuecomment-4585396626",
+                "body": (
+                    "The deploy planner's structural tag list drift was real: "
+                    "the new deployments role was missing from the planner wave "
+                    "and needed a regression test against ansible/parallel.yml."
+                ),
+            }
+        ],
+        "must_notice": [
+            (
+                "the deployments role is missing from the deploy planner tag "
+                "waves even though it was added to Ansible"
+            ),
+            (
+                "planner tags can drift from ansible/parallel.yml and cause "
+                "full deploys or deployments-only changes to skip the role"
+            ),
+        ],
+        "must_notice_terms": [
+            ["deployments"],
+            ["APP_TAGS", "planner", "deploy planner", "tag list"],
+            ["ansible/parallel.yml", "parallel.yml", "parallel"],
+            ["skip", "missing", "drift", "not included"],
+        ],
+        "avoid_notes": [
+            "treating this as only deploy efficiency",
+            "claiming the role is covered without comparing planner tags to Ansible waves",
+        ],
+    },
+    {
+        "name": "sas-prefect-control-plane-tags-drift",
+        "repo": "https://github.com/sahilsk11/sas.git",
+        "base_sha": "6b1c471a47f6d92168a7cb9bb0401f9bdc44bc27",
+        "head_sha": "8cef5a8c666b4edd70413f33fa268c4728921acf",
+        "source_pr": "https://github.com/sahilsk11/sas/pull/150",
+        "title": "Implement two-phase Prefect deploy",
+        "body": (
+            "Splits deploys into GitHub-observed prepare and Prefect-observed "
+            "worker phases, with control-plane tags handled outside Prefect."
+        ),
+        "validated_comments": [
+            {
+                "grade": "valid",
+                "url": "https://github.com/sahilsk11/sas/pull/150#issuecomment-4585673822",
+                "body": (
+                    "CONTROL_PLANE_TAGS was duplicated independently in Bash "
+                    "and Python, so prepare and worker filtering could drift."
+                ),
+            }
+        ],
+        "must_notice": [
+            (
+                "CONTROL_PLANE_TAGS is defined independently in Python and Bash "
+                "with no sync enforcement"
+            ),
+            (
+                "if the sets diverge, prepare and worker phases handle different "
+                "control-plane tags and can defeat self-observation avoidance"
+            ),
+        ],
+        "must_notice_terms": [
+            ["CONTROL_PLANE_TAGS", "control-plane tags", "control plane tags"],
+            ["bash", "sas-actions-deploy"],
+            ["python", "flow.py", "sas.deploy.flow"],
+            ["drift", "diverge", "sync", "source of truth"],
+        ],
+        "avoid_notes": [
+            "treating duplicated constants as a style-only issue",
+            "missing the cross-language behavior split between prepare and worker",
+        ],
+    },
+    {
+        "name": "sas-prefect-work-pool-create-failure",
+        "repo": "https://github.com/sahilsk11/sas.git",
+        "base_sha": "6b1c471a47f6d92168a7cb9bb0401f9bdc44bc27",
+        "head_sha": "8cef5a8c666b4edd70413f33fa268c4728921acf",
+        "source_pr": "https://github.com/sahilsk11/sas/pull/150",
+        "title": "Implement two-phase Prefect deploy",
+        "body": (
+            "Adds Prefect worker service and deployment registration for the "
+            "two-phase SAS deploy architecture."
+        ),
+        "validated_comments": [
+            {
+                "grade": "partial",
+                "url": "https://github.com/sahilsk11/sas/pull/150#issuecomment-4585674189",
+                "body": (
+                    "register_deployment had a real work-pool creation issue: "
+                    "registration could continue to prefect deploy after work "
+                    "pool creation failed."
+                ),
+            }
+        ],
+        "must_notice": [
+            (
+                "deployment registration should stop if Prefect work-pool "
+                "creation fails"
+            ),
+            (
+                "continuing to prefect deploy after a failed work-pool creation "
+                "hides setup failure and can produce misleading deploy output"
+            ),
+        ],
+        "must_notice_terms": [
+            ["work pool", "work-pool"],
+            ["prefect deploy", "register_deployment", "deployment registration"],
+            ["create", "creation"],
+            ["fail", "failure", "return code", "exit"],
+        ],
+        "avoid_notes": [
+            "requiring the broader deploy subprocess claim to be true",
+            "missing the narrowed work-pool creation failure path",
+        ],
+    },
+    {
+        "name": "code-reviewer-braintrust-configure-crash",
+        "repo": "https://github.com/sahilsk11/code-reviewer.git",
+        "base_sha": "6ff95b46612648d172b6a1f6a846622e785bacc7",
+        "head_sha": "abca301c6b4927be21456fe6ee2cb3a50485dafd",
+        "source_pr": "https://github.com/sahilsk11/code-reviewer/pull/2",
+        "title": "Install Braintrust SDK tracing",
+        "body": (
+            "Adds Braintrust tracing and eval tooling while keeping the CLI "
+            "usable when Braintrust is absent or disabled."
+        ),
+        "validated_comments": [
+            {
+                "grade": "valid",
+                "url": "https://github.com/sahilsk11/code-reviewer/pull/2#issuecomment-4570159981",
+                "body": (
+                    "configure_braintrust() ran before argument parsing with no "
+                    "try/except, so Braintrust SDK failures could crash even "
+                    "code-review --help."
+                ),
+            }
+        ],
+        "must_notice": [
+            (
+                "configure_braintrust runs before CLI parsing and can crash the "
+                "entire CLI if Braintrust import/instrumentation/logger setup fails"
+            ),
+            (
+                "optional tracing must degrade gracefully so commands like --help "
+                "or install-workflow still work"
+            ),
+        ],
+        "must_notice_terms": [
+            ["configure_braintrust"],
+            ["braintrust"],
+            ["try", "except", "catch", "gracefully", "degrade"],
+            ["--help", "help", "CLI", "parser", "parse_args"],
+        ],
+        "avoid_notes": [
+            "only checking for missing API keys",
+            "assuming optional instrumentation failures are harmless",
+        ],
+    },
+    {
+        "name": "kanna-opencode-concurrent-server-startup",
+        "repo": "https://github.com/sahilsk11/kanna.git",
+        "base_sha": "206a835a252f2f5a12c9378431d08e57b2b1081e",
+        "head_sha": "df59d72931d07e4e7288d986fed0571088f921fa",
+        "source_pr": "https://github.com/sahilsk11/kanna/pull/17",
+        "title": "Replace OpenCode ACP with server integration",
+        "body": (
+            "Routes OpenCode through a dedicated opencode serve HTTP/SSE "
+            "manager and adds server event mapping tests."
+        ),
+        "validated_comments": [
+            {
+                "grade": "valid",
+                "url": "https://github.com/sahilsk11/kanna/pull/17#issuecomment-4584466439",
+                "body": (
+                    "Concurrent same-cwd OpenCode server startup needed dedupe, "
+                    "and server diagnostics/crash text handling needed to be "
+                    "scoped to the right ServerState."
+                ),
+            }
+        ],
+        "must_notice": [
+            (
+                "concurrent ensureServer calls for the same cwd can spawn or "
+                "race multiple OpenCode server starts without a starting-server guard"
+            ),
+            (
+                "server diagnostics and buffered crash text need to stay scoped "
+                "to the correct ServerState"
+            ),
+        ],
+        "must_notice_terms": [
+            ["ensureServer", "ensure server", "server startup", "startingServers"],
+            ["concurrent", "race", "double-spawn", "same cwd", "same-cwd"],
+            ["OpenCode", "opencode"],
+            ["ServerState", "stderrLines", "diagnostics", "buffered"],
+        ],
+        "avoid_notes": [
+            "focusing only on style or provider abstraction",
+            "treating all server lifecycle findings as already fixed at the pre-fix commit",
         ],
     },
 ]
@@ -98,6 +316,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--project", default=braintrust_project())
     parser.add_argument("--model", default="gpt-5.3-codex-spark")
     parser.add_argument("--timeout", type=int, default=240)
+    parser.add_argument(
+        "--max-concurrency",
+        type=positive_int,
+        default=default_max_concurrency(),
+        help="Maximum number of eval cases to run at once.",
+    )
     args = parser.parse_args(argv)
 
     if not os.environ.get("BRAINTRUST_API_KEY"):
@@ -114,16 +338,43 @@ def main(argv: list[str] | None = None) -> int:
             for case in CASES
         ],
         task=lambda input: run_case(input, model=args.model, timeout=args.timeout),
-        scores=[completed, output_present, known_issue_present],
+        scores=[
+            completed,
+            output_present,
+            known_issue_present,
+            no_false_clean_bill,
+            evidence_specificity,
+            actionable_finding,
+            severity_reasonable,
+            avoid_known_bad_claims,
+        ],
         metadata={
             "runner": "evals/reviewer_correctness_regressions.py",
             "prompt_file": f"src/code_reviewer/prompts/{PROMPT_FILE}",
             "model": args.model,
         },
-        max_concurrency=1,
+        max_concurrency=args.max_concurrency,
     )
     print(result.summary)
     return 0
+
+
+def default_max_concurrency() -> int:
+    value = os.environ.get("CODEX_EVAL_MAX_CONCURRENCY", "1")
+    try:
+        return positive_int(value)
+    except (argparse.ArgumentTypeError, ValueError) as exc:
+        raise SystemExit(f"CODEX_EVAL_MAX_CONCURRENCY: {exc}") from exc
+
+
+def positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
+    if parsed < 1:
+        raise argparse.ArgumentTypeError("must be >= 1")
+    return parsed
 
 
 def case_metadata(case: dict[str, Any], *, model: str) -> dict[str, Any]:
@@ -345,30 +596,256 @@ def output_present(
 def known_issue_present(
     input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
 ) -> Score:
-    term_groups = input.get("must_notice_terms") or []
-    if not term_groups:
-        return Score(name="known_issue_present", score=None)
+    return term_group_score(
+        name="known_issue_present",
+        term_groups=input.get("must_notice_terms") or [],
+        markdown=str(output.get("markdown") or ""),
+    )
+
+
+def no_false_clean_bill(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    if not input.get("must_notice_terms"):
+        return Score(name="no_false_clean_bill", score=None)
+
+    clean_phrases = [
+        "no findings",
+        "no defects",
+        "no correctness regressions",
+        "no high-confidence correctness",
+        "no high confidence correctness",
+        "could not identify any",
+        "did not find a",
+        "did not find any",
+    ]
+    matched = matched_unnegated_phrases(
+        str(output.get("markdown") or ""),
+        clean_phrases,
+        skip_no_scope_qualifiers=True,
+    )
+    return Score(
+        name="no_false_clean_bill",
+        score=0.0 if matched else 1.0,
+        metadata={"matched": matched},
+    )
+
+
+def evidence_specificity(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    term_groups = input.get("must_cite_terms") or []
+    return term_group_score(
+        name="evidence_specificity",
+        term_groups=term_groups,
+        markdown=str(output.get("markdown") or ""),
+    )
+
+
+def actionable_finding(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    markdown = normalize_text(str(output.get("markdown") or ""))
+    if not markdown:
+        return Score(name="actionable_finding", score=0.0)
+
+    clean_bill_score = no_false_clean_bill(input, output, expected).score
+    if clean_bill_score == 0.0:
+        return Score(
+            name="actionable_finding",
+            score=0.0,
+            metadata={"reason": "false_clean_bill"},
+        )
+
+    issue_score = known_issue_present(input, output, expected).score or 0.0
+    consequence_terms = [
+        "because",
+        "so ",
+        "therefore",
+        "can ",
+        "could ",
+        "would ",
+        "will ",
+        "risk",
+        "regression",
+        "fail",
+        "crash",
+        "skip",
+        "ignore",
+        "missing",
+    ]
+    location_terms = terms_from_groups(input.get("must_notice_terms") or [])
+    has_consequence = any(term in markdown for term in consequence_terms)
+    has_location = any(term in markdown for term in location_terms)
+    score = (issue_score + float(has_consequence) + float(has_location)) / 3
+    return Score(
+        name="actionable_finding",
+        score=score,
+        metadata={
+            "known_issue_score": issue_score,
+            "has_consequence": has_consequence,
+            "has_location": has_location,
+        },
+    )
+
+
+def severity_reasonable(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    if not input.get("must_notice_terms"):
+        return Score(name="severity_reasonable", score=None)
+
+    clean_bill_score = no_false_clean_bill(input, output, expected).score
+    if clean_bill_score == 0.0:
+        return Score(
+            name="severity_reasonable",
+            score=0.0,
+            metadata={"reason": "false_clean_bill"},
+        )
 
     markdown = normalize_text(str(output.get("markdown") or ""))
+    severity_terms = [
+        "blocking",
+        "high",
+        "medium",
+        "correctness",
+        "regression",
+        "bug",
+        "crash",
+        "failure",
+        "fails",
+        "skip",
+        "silently",
+    ]
+    minimizing_terms = [
+        "style only",
+        "cleanup only",
+        "nit",
+        "not a blocking finding",
+        "not a correctness issue",
+        "no code change needed",
+    ]
+    matched = [term for term in severity_terms if term in markdown]
+    minimized = matched_unnegated_phrases(str(output.get("markdown") or ""), minimizing_terms)
+    if matched and not minimized:
+        score = 1.0
+    elif matched:
+        score = 0.5
+    else:
+        score = 0.0
+    return Score(
+        name="severity_reasonable",
+        score=score,
+        metadata={"matched": matched, "minimized": minimized},
+    )
+
+
+def avoid_known_bad_claims(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    bad_term_groups = input.get("avoid_output_terms") or [
+        ["no findings"],
+        ["no defects"],
+        ["no correctness regressions"],
+        ["no high-confidence correctness"],
+        ["no high confidence correctness"],
+        ["style only"],
+        ["cleanup only"],
+    ]
+    markdown = str(output.get("markdown") or "")
+    matched = [
+        terms
+        for terms in bad_term_groups
+        if matched_unnegated_phrases(
+            markdown,
+            [str(term) for term in terms],
+            skip_no_scope_qualifiers=True,
+        )
+    ]
+    return Score(
+        name="avoid_known_bad_claims",
+        score=1.0 if not matched else 0.0,
+        metadata={"matched": matched},
+    )
+
+
+def term_group_score(*, name: str, term_groups: list[list[str]], markdown: str) -> Score:
+    if not term_groups:
+        return Score(name=name, score=None)
+
+    normalized_markdown = normalize_text(markdown)
     matched = []
     missing = []
     for terms in term_groups:
         normalized_terms = [normalize_text(str(term)) for term in terms]
-        if any(term in markdown for term in normalized_terms):
+        if any(term in normalized_markdown for term in normalized_terms):
             matched.append(terms)
         else:
             missing.append(terms)
 
     return Score(
-        name="known_issue_present",
+        name=name,
         score=len(matched) / len(term_groups),
         metadata={"matched": matched, "missing": missing},
     )
 
 
-def normalize_text(text: str) -> str:
-    import re
+def terms_from_groups(term_groups: list[list[str]]) -> list[str]:
+    return [normalize_text(term) for terms in term_groups for term in terms]
 
+
+def matched_unnegated_phrases(
+    markdown: str,
+    phrases: list[str],
+    *,
+    skip_no_scope_qualifiers: bool = False,
+) -> list[str]:
+    normalized = normalize_text(markdown)
+    return [
+        phrase
+        for phrase in phrases
+        if has_unnegated_phrase(
+            normalized,
+            normalize_text(phrase),
+            skip_no_scope_qualifiers=skip_no_scope_qualifiers,
+        )
+    ]
+
+
+def has_unnegated_phrase(
+    normalized_markdown: str,
+    normalized_phrase: str,
+    *,
+    skip_no_scope_qualifiers: bool = False,
+) -> bool:
+    if not normalized_phrase:
+        return False
+
+    pattern = phrase_pattern(normalized_phrase, skip_no_scope_qualifiers=skip_no_scope_qualifiers)
+    for match in re.finditer(pattern, normalized_markdown):
+        prefix = normalized_markdown[max(0, match.start() - 24) : match.start()]
+        if re.search(
+            r"(?:\bnot(?:\s+a|\s+an)?|\bis\s+not(?:\s+a|\s+an)?|\bisn't(?:\s+a|\s+an)?)\s+$",
+            prefix,
+        ):
+            continue
+        return True
+    return False
+
+
+def phrase_pattern(normalized_phrase: str, *, skip_no_scope_qualifiers: bool) -> str:
+    parts = [re.escape(part) for part in normalized_phrase.split()]
+    if not parts:
+        return r"a^"
+    if skip_no_scope_qualifiers and parts[0] == "no" and len(parts) > 1:
+        qualifier = r"(?!(?:other|additional|further|remaining|more)\b)"
+        body = r"\s+".join([parts[0], qualifier + parts[1], *parts[2:]])
+    else:
+        body = r"\s+".join(parts)
+    return rf"(?<!\w){body}(?!\w)"
+
+
+def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.casefold()).strip()
 
 

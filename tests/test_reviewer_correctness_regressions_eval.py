@@ -110,6 +110,87 @@ def test_known_issue_score_fails_when_review_misses_case_issue() -> None:
     assert metadata["missing"] == case["must_notice_terms"]
 
 
+def test_review_quality_scores_explain_usefulness_dimensions() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+            ["blocking_count"],
+            ["blocking: true", "per-comment"],
+            ["mask", "override", "undercount", "ignore", "non-blocking"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "This is a blocking correctness bug in count_blocking. Because "
+            "blocking_count can override a per-comment blocking: true flag, "
+            "the publisher can silently treat a blocking review as non-blocking."
+        )
+    }
+
+    assert eval_module.no_false_clean_bill(case, output, {}).score == 1.0
+    assert eval_module.evidence_specificity(case, output, {}).score is None
+    assert eval_module.actionable_finding(case, output, {}).score == 1.0
+    assert eval_module.severity_reasonable(case, output, {}).score == 1.0
+    assert eval_module.avoid_known_bad_claims(case, output, {}).score == 1.0
+
+
+def test_review_quality_scores_penalize_clean_bill_on_known_bug() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+            ["blocking_count"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "No high-confidence correctness regressions or concrete defects "
+            "were found in the provided diff."
+        )
+    }
+
+    assert eval_module.no_false_clean_bill(case, output, {}).score == 0.0
+    assert eval_module.evidence_specificity(case, output, {}).score is None
+    assert eval_module.actionable_finding(case, output, {}).score == 0.0
+    assert eval_module.severity_reasonable(case, output, {}).score == 0.0
+    assert eval_module.avoid_known_bad_claims(case, output, {}).score == 0.0
+
+
+def test_clean_bill_scores_allow_scoped_no_other_defects_summary() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+            ["blocking_count"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "This is a blocking correctness bug in count_blocking because "
+            "blocking_count can override blocking comments. No other defects "
+            "were found."
+        )
+    }
+
+    assert eval_module.no_false_clean_bill(case, output, {}).score == 1.0
+    assert eval_module.actionable_finding(case, output, {}).score == 1.0
+    assert eval_module.avoid_known_bad_claims(case, output, {}).score == 1.0
+
+
+def test_severity_reasonable_allows_negated_minimizing_terms() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "This is a blocking correctness bug in count_blocking, not a style "
+            "only issue."
+        )
+    }
+
+    assert eval_module.severity_reasonable(case, output, {}).score == 1.0
+
+
 def test_code_reviewer_case_captures_validated_pr8_regression() -> None:
     case = next(
         case
@@ -124,6 +205,55 @@ def test_code_reviewer_case_captures_validated_pr8_regression() -> None:
     assert "blocking_count" in case["validated_comments"][0]["body"]
     assert any("undercount blocking comments" in item for item in case["must_notice"])
     assert ["count_blocking"] in case["must_notice_terms"]
+
+
+def test_recent_validated_cases_capture_source_prs_and_terms() -> None:
+    expected = {
+        "sas-deploy-planner-missing-deployments-role": {
+            "source_pr": "https://github.com/sahilsk11/sas/pull/149",
+            "head_sha": "88c8918d425fe464b39e975481790fd9787ea941",
+            "term": "deployments",
+            "grade": "valid",
+        },
+        "sas-prefect-control-plane-tags-drift": {
+            "source_pr": "https://github.com/sahilsk11/sas/pull/150",
+            "head_sha": "8cef5a8c666b4edd70413f33fa268c4728921acf",
+            "term": "CONTROL_PLANE_TAGS",
+            "grade": "valid",
+        },
+        "sas-prefect-work-pool-create-failure": {
+            "source_pr": "https://github.com/sahilsk11/sas/pull/150",
+            "head_sha": "8cef5a8c666b4edd70413f33fa268c4728921acf",
+            "term": "work pool",
+            "grade": "partial",
+        },
+        "code-reviewer-braintrust-configure-crash": {
+            "source_pr": "https://github.com/sahilsk11/code-reviewer/pull/2",
+            "head_sha": "abca301c6b4927be21456fe6ee2cb3a50485dafd",
+            "term": "configure_braintrust",
+            "grade": "valid",
+        },
+        "kanna-opencode-concurrent-server-startup": {
+            "source_pr": "https://github.com/sahilsk11/kanna/pull/17",
+            "head_sha": "df59d72931d07e4e7288d986fed0571088f921fa",
+            "term": "OpenCode",
+            "grade": "valid",
+        },
+    }
+    cases = {case["name"]: case for case in eval_module.CASES}
+
+    for name, fields in expected.items():
+        case = cases[name]
+        assert case["source_pr"] == fields["source_pr"]
+        assert case["head_sha"] == fields["head_sha"]
+        assert case["validated_comments"][0]["grade"] == fields["grade"]
+        assert any(fields["term"] in terms for terms in case["must_notice_terms"])
+
+
+def test_all_cases_have_known_issue_terms() -> None:
+    for case in eval_module.CASES:
+        assert case["must_notice_terms"], case["name"]
+        assert all(isinstance(terms, list) and terms for terms in case["must_notice_terms"])
 
 
 def test_case_metadata_exposes_braintrust_filter_fields() -> None:
@@ -147,6 +277,34 @@ def test_case_metadata_exposes_braintrust_filter_fields() -> None:
         "prompt_node": "reviewer_correctness_regressions",
         "prompt_file": "src/code_reviewer/prompts/reviewer_correctness_regressions.md",
     }
+
+
+def test_max_concurrency_default_can_be_overridden_by_environment(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_EVAL_MAX_CONCURRENCY", "3")
+
+    assert eval_module.default_max_concurrency() == 3
+
+
+def test_positive_int_rejects_non_positive_values() -> None:
+    assert eval_module.positive_int("1") == 1
+
+    try:
+        eval_module.positive_int("0")
+    except Exception as exc:
+        assert "must be >= 1" in str(exc)
+    else:
+        raise AssertionError("expected positive_int to reject zero")
+
+
+def test_default_max_concurrency_rejects_invalid_environment(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_EVAL_MAX_CONCURRENCY", "abc")
+
+    try:
+        eval_module.default_max_concurrency()
+    except SystemExit as exc:
+        assert "CODEX_EVAL_MAX_CONCURRENCY: must be an integer" in str(exc)
+    else:
+        raise AssertionError("expected invalid concurrency environment to exit cleanly")
 
 
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:

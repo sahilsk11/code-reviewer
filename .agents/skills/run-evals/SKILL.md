@@ -48,6 +48,14 @@ If the user asks for a specific model or timeout, pass them through:
 $PYTHON evals/reviewer_correctness_regressions.py --model "$MODEL" --timeout "$TIMEOUT" 2>&1 | tee /tmp/code-reviewer-evals.log
 ```
 
+If the user asks to run cases in parallel, pass `--max-concurrency N` or set `CODEX_EVAL_MAX_CONCURRENCY=N`:
+
+```sh
+$PYTHON evals/reviewer_correctness_regressions.py --max-concurrency "$N" 2>&1 | tee /tmp/code-reviewer-evals.log
+```
+
+Default to `1` for reproducibility and to avoid surprise Codex/API pressure. Use small values like `2` or `3` first; each concurrent case starts its own repo checkout and `codex exec` run.
+
 ## Summarize Results
 
 Extract the Braintrust experiment URL when present:
@@ -87,9 +95,15 @@ Compared against: `<baseline-experiment-name>`
 | completed | 100.00% | +100.00% | 1 improvement, 0 regressions |
 | output_present | 100.00% | +100.00% | 1 improvement, 0 regressions |
 | known_issue_present | 50.00% | - | 0 improvements, 0 regressions |
+| no_false_clean_bill | 100.00% | - | 0 improvements, 0 regressions |
+| evidence_specificity | n/a | - | optional; only shown when cases define cite terms |
+| actionable_finding | 66.67% | - | 0 improvements, 0 regressions |
+| severity_reasonable | 100.00% | - | 0 improvements, 0 regressions |
+| avoid_known_bad_claims | 100.00% | - | 0 improvements, 0 regressions |
 
 Notes:
 - `known_issue_present` measures whether each case output mentions the known issue terms defined by the fixture.
+- `evidence_specificity` is only meaningful for cases that define separate `must_cite_terms`.
 - Full traces, task outputs, and metadata are in Braintrust.
 ````
 
@@ -147,7 +161,16 @@ for line in body.splitlines():
     if match:
         rows.append(match.groupdict())
 
-priority = ["completed", "output_present", "known_issue_present"]
+priority = [
+    "completed",
+    "output_present",
+    "known_issue_present",
+    "no_false_clean_bill",
+    "evidence_specificity",
+    "actionable_finding",
+    "severity_reasonable",
+    "avoid_known_bad_claims",
+]
 rows_by_score = {row["score"]: row for row in rows}
 ordered_rows = [rows_by_score[name] for name in priority if name in rows_by_score]
 ordered_rows.extend(row for row in rows if row["score"] not in priority)
