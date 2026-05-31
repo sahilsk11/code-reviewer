@@ -86,10 +86,10 @@ Compared against: `<baseline-experiment-name>`
 | --- | ---: | ---: | --- |
 | completed | 100.00% | +100.00% | 1 improvement, 0 regressions |
 | output_present | 100.00% | +100.00% | 1 improvement, 0 regressions |
-| finding_shape_present | 0.00% | - | 0 improvements, 0 regressions |
+| known_issue_present | 50.00% | - | 0 improvements, 0 regressions |
 
 Notes:
-- `finding_shape_present` is a weak format scorer today; a low value is useful context, not automatically a failed review.
+- `known_issue_present` measures whether each case output mentions the known issue terms defined by the fixture.
 - Full traces, task outputs, and metadata are in Braintrust.
 ````
 
@@ -147,7 +147,7 @@ for line in body.splitlines():
     if match:
         rows.append(match.groupdict())
 
-priority = ["completed", "output_present", "finding_shape_present"]
+priority = ["completed", "output_present", "known_issue_present"]
 rows_by_score = {row["score"]: row for row in rows}
 ordered_rows = [rows_by_score[name] for name in priority if name in rows_by_score]
 ordered_rows.extend(row for row in rows if row["score"] not in priority)
@@ -169,7 +169,7 @@ lines.extend(
     [
         "",
         "Notes:",
-        "- `finding_shape_present` is a weak format scorer today; a low value is useful context, not automatically a failed review.",
+        "- `known_issue_present` measures whether each case output mentions the known issue terms defined by the fixture.",
         "- Full traces, task outputs, and metadata are in Braintrust.",
         "",
     ]
