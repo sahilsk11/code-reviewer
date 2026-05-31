@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from code_reviewer.workflow_builder import WorkflowConfig, render_workflow, write_workflow
+from code_reviewer.workflow_builder import (
+    AGENT_MAX_ATTEMPTS,
+    WorkflowConfig,
+    render_workflow,
+    write_workflow,
+)
 
 
 def test_render_workflow_uses_configured_harness_model_and_prompt() -> None:
@@ -14,6 +19,10 @@ def test_render_workflow_uses_configured_harness_model_and_prompt() -> None:
     assert "provider: codex" in workflow
     assert "model: gpt-test" in workflow
     assert "/home/code-reviewer" not in workflow
+    assert (
+        f"retry:\n      max_attempts: {AGENT_MAX_ATTEMPTS}\n"
+        "      delay_ms: 10000\n      on_error: all"
+    ) in workflow
     assert "id: collect_github_context" in workflow
     assert "Identify the canonical implementation transcript" in workflow
     assert "Review this PR for correctness and regressions." in workflow

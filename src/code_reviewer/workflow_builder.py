@@ -9,6 +9,7 @@ WORKFLOW_FILENAME = f"{WORKFLOW_NAME}.yaml"
 DEFAULT_HARNESS = "opencode"
 DEFAULT_MODEL = "opencode-go/deepseek-v4-pro"
 DEFAULT_ADDITIONAL_DIRECTORIES: tuple[str, ...] = ()
+AGENT_MAX_ATTEMPTS = 3
 BASH_NODE_IDS = (
     "prepare_worktree",
     "collect_github_context",
@@ -161,7 +162,7 @@ def render_agent_node(node: AgentNode, model: str) -> list[str]:
         f"    model: {model}",
         "    idle_timeout: 600000",
         "    retry:",
-        "      max_attempts: 1",
+        f"      max_attempts: {AGENT_MAX_ATTEMPTS}",
         "      delay_ms: 10000",
         "      on_error: all",
         "    prompt: |",

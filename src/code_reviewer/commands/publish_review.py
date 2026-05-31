@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
             blocking_count=blocking_count,
             published=[],
         )
-        return 1 if blocking_count else 0
+        return 0
 
     published = publish_comments(
         repository=repository,
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
         blocking_count=blocking_count,
         published=published,
     )
-    return 1 if blocking_count else 0
+    return 0
 
 
 def extract_publish_payload(text: str) -> dict[str, Any]:
