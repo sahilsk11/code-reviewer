@@ -161,3 +161,22 @@ plus immutable base/head commits. The eval clones the repo into a temporary
 checkout, renders `reviewer_correctness_regressions.md` with minimal
 Archon-style context, runs `codex exec` locally, and uploads the local task
 output plus lightweight Python scores to Braintrust.
+
+The `.github/workflows/braintrust-evals.yml` workflow runs these evals through
+the Braintrust GitHub Action. It currently runs on manual dispatch, on pushes to
+`main` that touch eval or prompt files, and on pull requests that touch eval or
+prompt files. The action uses the `paths` input to decide which eval file to
+run; by default that is `evals/reviewer_correctness_regressions.py`.
+
+The workflow needs repository secrets:
+
+```text
+BRAINTRUST_API_KEY
+OPENAI_API_KEY
+```
+
+Braintrust stores the experiment, inputs, local task outputs, scores, and run
+metadata. The model work still happens on the GitHub runner through `codex
+exec`; Braintrust does not run the reviewer agent remotely. The action posts a
+PR comment with the Braintrust experiment link and score summary when it runs
+on a pull request.

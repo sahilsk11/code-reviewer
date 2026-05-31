@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = REPO_ROOT / "src"
@@ -46,40 +46,66 @@ def main(argv: list[str] | None = None) -> int:
         description="Braintrust eval for the correctness/regressions reviewer prompt."
     )
     parser.add_argument("--project", default=braintrust_project())
-    parser.add_argument("--model", default="gpt-5.3-codex-spark")
-    parser.add_argument("--timeout", type=int, default=240)
+    parser.add_argument("--model", default=default_model())
+    parser.add_argument("--timeout", type=int, default=default_timeout())
     args = parser.parse_args(argv)
 
     if not os.environ.get("BRAINTRUST_API_KEY"):
         raise SystemExit("BRAINTRUST_API_KEY is required to run this eval.")
 
-    result = Eval(
-        args.project,
-        experiment_name=f"reviewer-correctness-regressions-{slug(args.model)}",
-        data=[
-            {
-                "input": case,
-                "metadata": {
-                    "case": case["name"],
-                    "repo": case["repo"],
-                    "base_sha": case["base_sha"],
-                    "head_sha": case["head_sha"],
-                    "prompt_node": PROMPT_NODE,
-                },
-            }
-            for case in CASES
-        ],
-        task=lambda input: run_case(input, model=args.model, timeout=args.timeout),
+    result = run_eval(project=args.project, model=args.model, timeout=args.timeout)
+    print(result.summary)
+    return 0
+
+
+def run_eval(*, project: str, model: str, timeout: int):
+    return Eval(
+        project,
+        experiment_name=f"reviewer-correctness-regressions-{slug(model)}",
+        data=cast(Any, eval_data()),
+        task=lambda input: run_case(input, model=model, timeout=timeout),
         scores=[completed, output_present, finding_shape_present],
         metadata={
             "runner": "evals/reviewer_correctness_regressions.py",
             "prompt_file": f"src/code_reviewer/prompts/{PROMPT_FILE}",
-            "model": args.model,
+            "model": model,
         },
         max_concurrency=1,
     )
-    print(result.summary)
-    return 0
+
+
+def eval_data() -> list[dict[str, Any]]:
+    return [
+        {
+            "input": case,
+            "metadata": {
+                "case": case["name"],
+                "repo": case["repo"],
+                "base_sha": case["base_sha"],
+                "head_sha": case["head_sha"],
+                "prompt_node": PROMPT_NODE,
+            },
+        }
+        for case in CASES
+    ]
+
+
+def maybe_run_for_braintrust_cli() -> None:
+    if os.environ.get("BRAINTRUST_RUN_EVAL") != "1":
+        return
+    run_eval(
+        project=braintrust_project(),
+        model=default_model(),
+        timeout=default_timeout(),
+    )
+
+
+def default_model() -> str:
+    return os.environ.get("CODEX_EVAL_MODEL", "gpt-5.3-codex-spark")
+
+
+def default_timeout() -> int:
+    return int(os.environ.get("CODEX_EVAL_TIMEOUT", "240"))
 
 
 def run_case(case: dict[str, Any], *, model: str, timeout: int) -> dict[str, Any]:
@@ -325,6 +351,9 @@ def slug(value: str) -> str:
     import re
 
     return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+
+
+maybe_run_for_braintrust_cli()
 
 
 if __name__ == "__main__":
