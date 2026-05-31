@@ -110,6 +110,51 @@ def test_known_issue_score_fails_when_review_misses_case_issue() -> None:
     assert metadata["missing"] == case["must_notice_terms"]
 
 
+def test_review_quality_scores_explain_usefulness_dimensions() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+            ["blocking_count"],
+            ["blocking: true", "per-comment"],
+            ["mask", "override", "undercount", "ignore", "non-blocking"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "This is a blocking correctness bug in count_blocking. Because "
+            "blocking_count can override a per-comment blocking: true flag, "
+            "the publisher can silently treat a blocking review as non-blocking."
+        )
+    }
+
+    assert eval_module.no_false_clean_bill(case, output, {}).score == 1.0
+    assert eval_module.evidence_specificity(case, output, {}).score == 1.0
+    assert eval_module.actionable_finding(case, output, {}).score == 1.0
+    assert eval_module.severity_reasonable(case, output, {}).score == 1.0
+    assert eval_module.avoid_known_bad_claims(case, output, {}).score == 1.0
+
+
+def test_review_quality_scores_penalize_clean_bill_on_known_bug() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+            ["blocking_count"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "No high-confidence correctness regressions or concrete defects "
+            "were found in the provided diff."
+        )
+    }
+
+    assert eval_module.no_false_clean_bill(case, output, {}).score == 0.0
+    assert eval_module.evidence_specificity(case, output, {}).score == 0.0
+    assert eval_module.actionable_finding(case, output, {}).score == 0.0
+    assert eval_module.severity_reasonable(case, output, {}).score == 0.0
+    assert eval_module.avoid_known_bad_claims(case, output, {}).score == 0.0
+
+
 def test_code_reviewer_case_captures_validated_pr8_regression() -> None:
     case = next(
         case

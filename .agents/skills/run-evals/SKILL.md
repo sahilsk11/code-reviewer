@@ -95,6 +95,11 @@ Compared against: `<baseline-experiment-name>`
 | completed | 100.00% | +100.00% | 1 improvement, 0 regressions |
 | output_present | 100.00% | +100.00% | 1 improvement, 0 regressions |
 | known_issue_present | 50.00% | - | 0 improvements, 0 regressions |
+| no_false_clean_bill | 100.00% | - | 0 improvements, 0 regressions |
+| evidence_specificity | 50.00% | - | 0 improvements, 0 regressions |
+| actionable_finding | 66.67% | - | 0 improvements, 0 regressions |
+| severity_reasonable | 100.00% | - | 0 improvements, 0 regressions |
+| avoid_known_bad_claims | 100.00% | - | 0 improvements, 0 regressions |
 
 Notes:
 - `known_issue_present` measures whether each case output mentions the known issue terms defined by the fixture.
@@ -155,7 +160,16 @@ for line in body.splitlines():
     if match:
         rows.append(match.groupdict())
 
-priority = ["completed", "output_present", "known_issue_present"]
+priority = [
+    "completed",
+    "output_present",
+    "known_issue_present",
+    "no_false_clean_bill",
+    "evidence_specificity",
+    "actionable_finding",
+    "severity_reasonable",
+    "avoid_known_bad_claims",
+]
 rows_by_score = {row["score"]: row for row in rows}
 ordered_rows = [rows_by_score[name] for name in priority if name in rows_by_score]
 ordered_rows.extend(row for row in rows if row["score"] not in priority)

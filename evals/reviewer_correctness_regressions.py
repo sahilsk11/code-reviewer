@@ -334,7 +334,16 @@ def main(argv: list[str] | None = None) -> int:
             for case in CASES
         ],
         task=lambda input: run_case(input, model=args.model, timeout=args.timeout),
-        scores=[completed, output_present, known_issue_present],
+        scores=[
+            completed,
+            output_present,
+            known_issue_present,
+            no_false_clean_bill,
+            evidence_specificity,
+            actionable_finding,
+            severity_reasonable,
+            avoid_known_bad_claims,
+        ],
         metadata={
             "runner": "evals/reviewer_correctness_regressions.py",
             "prompt_file": f"src/code_reviewer/prompts/{PROMPT_FILE}",
@@ -576,25 +585,195 @@ def output_present(
 def known_issue_present(
     input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
 ) -> Score:
-    term_groups = input.get("must_notice_terms") or []
-    if not term_groups:
-        return Score(name="known_issue_present", score=None)
+    return term_group_score(
+        name="known_issue_present",
+        term_groups=input.get("must_notice_terms") or [],
+        markdown=str(output.get("markdown") or ""),
+    )
+
+
+def no_false_clean_bill(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    if not input.get("must_notice_terms"):
+        return Score(name="no_false_clean_bill", score=None)
 
     markdown = normalize_text(str(output.get("markdown") or ""))
+    clean_phrases = [
+        "no findings",
+        "no defects",
+        "no correctness regressions",
+        "no high-confidence correctness",
+        "no high confidence correctness",
+        "could not identify any",
+        "did not find a",
+        "did not find any",
+    ]
+    matched = [phrase for phrase in clean_phrases if phrase in markdown]
+    return Score(
+        name="no_false_clean_bill",
+        score=0.0 if matched else 1.0,
+        metadata={"matched": matched},
+    )
+
+
+def evidence_specificity(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    term_groups = input.get("must_cite_terms") or input.get("must_notice_terms") or []
+    return term_group_score(
+        name="evidence_specificity",
+        term_groups=term_groups,
+        markdown=str(output.get("markdown") or ""),
+    )
+
+
+def actionable_finding(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    markdown = normalize_text(str(output.get("markdown") or ""))
+    if not markdown:
+        return Score(name="actionable_finding", score=0.0)
+
+    clean_bill_score = no_false_clean_bill(input, output, expected).score
+    if clean_bill_score == 0.0:
+        return Score(
+            name="actionable_finding",
+            score=0.0,
+            metadata={"reason": "false_clean_bill"},
+        )
+
+    issue_score = known_issue_present(input, output, expected).score or 0.0
+    consequence_terms = [
+        "because",
+        "so ",
+        "therefore",
+        "can ",
+        "could ",
+        "would ",
+        "will ",
+        "risk",
+        "regression",
+        "fail",
+        "crash",
+        "skip",
+        "ignore",
+        "missing",
+    ]
+    location_terms = terms_from_groups(input.get("must_notice_terms") or [])
+    has_consequence = any(term in markdown for term in consequence_terms)
+    has_location = any(term in markdown for term in location_terms)
+    score = (issue_score + float(has_consequence) + float(has_location)) / 3
+    return Score(
+        name="actionable_finding",
+        score=score,
+        metadata={
+            "known_issue_score": issue_score,
+            "has_consequence": has_consequence,
+            "has_location": has_location,
+        },
+    )
+
+
+def severity_reasonable(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    if not input.get("must_notice_terms"):
+        return Score(name="severity_reasonable", score=None)
+
+    clean_bill_score = no_false_clean_bill(input, output, expected).score
+    if clean_bill_score == 0.0:
+        return Score(
+            name="severity_reasonable",
+            score=0.0,
+            metadata={"reason": "false_clean_bill"},
+        )
+
+    markdown = normalize_text(str(output.get("markdown") or ""))
+    severity_terms = [
+        "blocking",
+        "high",
+        "medium",
+        "correctness",
+        "regression",
+        "bug",
+        "crash",
+        "failure",
+        "fails",
+        "skip",
+        "silently",
+    ]
+    minimizing_terms = [
+        "style only",
+        "cleanup only",
+        "nit",
+        "not a blocking finding",
+        "not a correctness issue",
+        "no code change needed",
+    ]
+    matched = [term for term in severity_terms if term in markdown]
+    minimized = [term for term in minimizing_terms if term in markdown]
+    if matched and not minimized:
+        score = 1.0
+    elif matched:
+        score = 0.5
+    else:
+        score = 0.0
+    return Score(
+        name="severity_reasonable",
+        score=score,
+        metadata={"matched": matched, "minimized": minimized},
+    )
+
+
+def avoid_known_bad_claims(
+    input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
+) -> Score:
+    bad_term_groups = input.get("avoid_output_terms") or [
+        ["no findings"],
+        ["no defects"],
+        ["no correctness regressions"],
+        ["no high-confidence correctness"],
+        ["no high confidence correctness"],
+        ["style only"],
+        ["cleanup only"],
+    ]
+    markdown = normalize_text(str(output.get("markdown") or ""))
+    matched = []
+    for terms in bad_term_groups:
+        normalized_terms = [normalize_text(str(term)) for term in terms]
+        if any(term in markdown for term in normalized_terms):
+            matched.append(terms)
+    return Score(
+        name="avoid_known_bad_claims",
+        score=1.0 if not matched else 0.0,
+        metadata={"matched": matched},
+    )
+
+
+def term_group_score(*, name: str, term_groups: list[list[str]], markdown: str) -> Score:
+    if not term_groups:
+        return Score(name=name, score=None)
+
+    normalized_markdown = normalize_text(markdown)
     matched = []
     missing = []
     for terms in term_groups:
         normalized_terms = [normalize_text(str(term)) for term in terms]
-        if any(term in markdown for term in normalized_terms):
+        if any(term in normalized_markdown for term in normalized_terms):
             matched.append(terms)
         else:
             missing.append(terms)
 
     return Score(
-        name="known_issue_present",
+        name=name,
         score=len(matched) / len(term_groups),
         metadata={"matched": matched, "missing": missing},
     )
+
+
+def terms_from_groups(term_groups: list[list[str]]) -> list[str]:
+    return [normalize_text(term) for terms in term_groups for term in terms]
 
 
 def normalize_text(text: str) -> str:
