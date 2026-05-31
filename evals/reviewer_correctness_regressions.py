@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,9 @@ from code_reviewer.workflow_builder import read_prompt
 PROMPT_FILE = "reviewer_correctness_regressions.md"
 PROMPT_NODE = "reviewer_correctness_regressions"
 
+# `must_notice` and `avoid_notes` are human-readable case notes. Scoring uses
+# the structured `must_notice_terms`, optional `must_cite_terms`, and optional
+# `avoid_output_terms` fields.
 CASES: list[dict[str, Any]] = [
     {
         "name": "friday-narrator-final-recovery",
@@ -82,7 +86,7 @@ CASES: list[dict[str, Any]] = [
             ["blocking: true", "blocking true", "per-comment"],
             ["mask", "override", "undercount", "ignore", "non-blocking"],
         ],
-        "avoid": [
+        "avoid_notes": [
             "treating the issue as only style or cleanup",
             "requiring the agent output to match the original review wording",
         ],
@@ -125,7 +129,7 @@ CASES: list[dict[str, Any]] = [
             ["ansible/parallel.yml", "parallel.yml", "parallel"],
             ["skip", "missing", "drift", "not included"],
         ],
-        "avoid": [
+        "avoid_notes": [
             "treating this as only deploy efficiency",
             "claiming the role is covered without comparing planner tags to Ansible waves",
         ],
@@ -167,7 +171,7 @@ CASES: list[dict[str, Any]] = [
             ["python", "flow.py", "sas.deploy.flow"],
             ["drift", "diverge", "sync", "source of truth"],
         ],
-        "avoid": [
+        "avoid_notes": [
             "treating duplicated constants as a style-only issue",
             "missing the cross-language behavior split between prepare and worker",
         ],
@@ -210,7 +214,7 @@ CASES: list[dict[str, Any]] = [
             ["create", "creation"],
             ["fail", "failure", "return code", "exit"],
         ],
-        "avoid": [
+        "avoid_notes": [
             "requiring the broader deploy subprocess claim to be true",
             "missing the narrowed work-pool creation failure path",
         ],
@@ -253,7 +257,7 @@ CASES: list[dict[str, Any]] = [
             ["try", "except", "catch", "gracefully", "degrade"],
             ["--help", "help", "CLI", "parser", "parse_args"],
         ],
-        "avoid": [
+        "avoid_notes": [
             "only checking for missing API keys",
             "assuming optional instrumentation failures are harmless",
         ],
@@ -296,7 +300,7 @@ CASES: list[dict[str, Any]] = [
             ["OpenCode", "opencode"],
             ["ServerState", "stderrLines", "diagnostics", "buffered"],
         ],
-        "avoid": [
+        "avoid_notes": [
             "focusing only on style or provider abstraction",
             "treating all server lifecycle findings as already fixed at the pre-fix commit",
         ],
@@ -356,11 +360,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def default_max_concurrency() -> int:
-    return positive_int(os.environ.get("CODEX_EVAL_MAX_CONCURRENCY", "1"))
+    value = os.environ.get("CODEX_EVAL_MAX_CONCURRENCY", "1")
+    try:
+        return positive_int(value)
+    except (argparse.ArgumentTypeError, ValueError) as exc:
+        raise SystemExit(f"CODEX_EVAL_MAX_CONCURRENCY: {exc}") from exc
 
 
 def positive_int(value: str) -> int:
-    parsed = int(value)
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be an integer") from exc
     if parsed < 1:
         raise argparse.ArgumentTypeError("must be >= 1")
     return parsed
@@ -598,7 +609,6 @@ def no_false_clean_bill(
     if not input.get("must_notice_terms"):
         return Score(name="no_false_clean_bill", score=None)
 
-    markdown = normalize_text(str(output.get("markdown") or ""))
     clean_phrases = [
         "no findings",
         "no defects",
@@ -609,7 +619,11 @@ def no_false_clean_bill(
         "did not find a",
         "did not find any",
     ]
-    matched = [phrase for phrase in clean_phrases if phrase in markdown]
+    matched = matched_unnegated_phrases(
+        str(output.get("markdown") or ""),
+        clean_phrases,
+        skip_no_scope_qualifiers=True,
+    )
     return Score(
         name="no_false_clean_bill",
         score=0.0 if matched else 1.0,
@@ -620,7 +634,7 @@ def no_false_clean_bill(
 def evidence_specificity(
     input: dict[str, Any], output: dict[str, Any], expected: dict[str, Any]
 ) -> Score:
-    term_groups = input.get("must_cite_terms") or input.get("must_notice_terms") or []
+    term_groups = input.get("must_cite_terms") or []
     return term_group_score(
         name="evidence_specificity",
         term_groups=term_groups,
@@ -712,7 +726,7 @@ def severity_reasonable(
         "no code change needed",
     ]
     matched = [term for term in severity_terms if term in markdown]
-    minimized = [term for term in minimizing_terms if term in markdown]
+    minimized = matched_unnegated_phrases(str(output.get("markdown") or ""), minimizing_terms)
     if matched and not minimized:
         score = 1.0
     elif matched:
@@ -738,12 +752,16 @@ def avoid_known_bad_claims(
         ["style only"],
         ["cleanup only"],
     ]
-    markdown = normalize_text(str(output.get("markdown") or ""))
-    matched = []
-    for terms in bad_term_groups:
-        normalized_terms = [normalize_text(str(term)) for term in terms]
-        if any(term in markdown for term in normalized_terms):
-            matched.append(terms)
+    markdown = str(output.get("markdown") or "")
+    matched = [
+        terms
+        for terms in bad_term_groups
+        if matched_unnegated_phrases(
+            markdown,
+            [str(term) for term in terms],
+            skip_no_scope_qualifiers=True,
+        )
+    ]
     return Score(
         name="avoid_known_bad_claims",
         score=1.0 if not matched else 0.0,
@@ -776,9 +794,58 @@ def terms_from_groups(term_groups: list[list[str]]) -> list[str]:
     return [normalize_text(term) for terms in term_groups for term in terms]
 
 
-def normalize_text(text: str) -> str:
-    import re
+def matched_unnegated_phrases(
+    markdown: str,
+    phrases: list[str],
+    *,
+    skip_no_scope_qualifiers: bool = False,
+) -> list[str]:
+    normalized = normalize_text(markdown)
+    return [
+        phrase
+        for phrase in phrases
+        if has_unnegated_phrase(
+            normalized,
+            normalize_text(phrase),
+            skip_no_scope_qualifiers=skip_no_scope_qualifiers,
+        )
+    ]
 
+
+def has_unnegated_phrase(
+    normalized_markdown: str,
+    normalized_phrase: str,
+    *,
+    skip_no_scope_qualifiers: bool = False,
+) -> bool:
+    if not normalized_phrase:
+        return False
+
+    pattern = phrase_pattern(normalized_phrase, skip_no_scope_qualifiers=skip_no_scope_qualifiers)
+    for match in re.finditer(pattern, normalized_markdown):
+        prefix = normalized_markdown[max(0, match.start() - 24) : match.start()]
+        if re.search(
+            r"(?:\bnot(?:\s+a|\s+an)?|\bis\s+not(?:\s+a|\s+an)?|\bisn't(?:\s+a|\s+an)?)\s+$",
+            prefix,
+        ):
+            continue
+        return True
+    return False
+
+
+def phrase_pattern(normalized_phrase: str, *, skip_no_scope_qualifiers: bool) -> str:
+    parts = [re.escape(part) for part in normalized_phrase.split()]
+    if not parts:
+        return r"a^"
+    if skip_no_scope_qualifiers and parts[0] == "no" and len(parts) > 1:
+        qualifier = r"(?!(?:other|additional|further|remaining|more)\b)"
+        body = r"\s+".join([parts[0], qualifier + parts[1], *parts[2:]])
+    else:
+        body = r"\s+".join(parts)
+    return rf"(?<!\w){body}(?!\w)"
+
+
+def normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text.casefold()).strip()
 
 

@@ -96,13 +96,14 @@ Compared against: `<baseline-experiment-name>`
 | output_present | 100.00% | +100.00% | 1 improvement, 0 regressions |
 | known_issue_present | 50.00% | - | 0 improvements, 0 regressions |
 | no_false_clean_bill | 100.00% | - | 0 improvements, 0 regressions |
-| evidence_specificity | 50.00% | - | 0 improvements, 0 regressions |
+| evidence_specificity | n/a | - | optional; only shown when cases define cite terms |
 | actionable_finding | 66.67% | - | 0 improvements, 0 regressions |
 | severity_reasonable | 100.00% | - | 0 improvements, 0 regressions |
 | avoid_known_bad_claims | 100.00% | - | 0 improvements, 0 regressions |
 
 Notes:
 - `known_issue_present` measures whether each case output mentions the known issue terms defined by the fixture.
+- `evidence_specificity` is only meaningful for cases that define separate `must_cite_terms`.
 - Full traces, task outputs, and metadata are in Braintrust.
 ````
 

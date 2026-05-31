@@ -128,7 +128,7 @@ def test_review_quality_scores_explain_usefulness_dimensions() -> None:
     }
 
     assert eval_module.no_false_clean_bill(case, output, {}).score == 1.0
-    assert eval_module.evidence_specificity(case, output, {}).score == 1.0
+    assert eval_module.evidence_specificity(case, output, {}).score is None
     assert eval_module.actionable_finding(case, output, {}).score == 1.0
     assert eval_module.severity_reasonable(case, output, {}).score == 1.0
     assert eval_module.avoid_known_bad_claims(case, output, {}).score == 1.0
@@ -149,10 +149,46 @@ def test_review_quality_scores_penalize_clean_bill_on_known_bug() -> None:
     }
 
     assert eval_module.no_false_clean_bill(case, output, {}).score == 0.0
-    assert eval_module.evidence_specificity(case, output, {}).score == 0.0
+    assert eval_module.evidence_specificity(case, output, {}).score is None
     assert eval_module.actionable_finding(case, output, {}).score == 0.0
     assert eval_module.severity_reasonable(case, output, {}).score == 0.0
     assert eval_module.avoid_known_bad_claims(case, output, {}).score == 0.0
+
+
+def test_clean_bill_scores_allow_scoped_no_other_defects_summary() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+            ["blocking_count"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "This is a blocking correctness bug in count_blocking because "
+            "blocking_count can override blocking comments. No other defects "
+            "were found."
+        )
+    }
+
+    assert eval_module.no_false_clean_bill(case, output, {}).score == 1.0
+    assert eval_module.actionable_finding(case, output, {}).score == 1.0
+    assert eval_module.avoid_known_bad_claims(case, output, {}).score == 1.0
+
+
+def test_severity_reasonable_allows_negated_minimizing_terms() -> None:
+    case = {
+        "must_notice_terms": [
+            ["count_blocking"],
+        ]
+    }
+    output = {
+        "markdown": (
+            "This is a blocking correctness bug in count_blocking, not a style "
+            "only issue."
+        )
+    }
+
+    assert eval_module.severity_reasonable(case, output, {}).score == 1.0
 
 
 def test_code_reviewer_case_captures_validated_pr8_regression() -> None:
@@ -258,6 +294,17 @@ def test_positive_int_rejects_non_positive_values() -> None:
         assert "must be >= 1" in str(exc)
     else:
         raise AssertionError("expected positive_int to reject zero")
+
+
+def test_default_max_concurrency_rejects_invalid_environment(monkeypatch) -> None:
+    monkeypatch.setenv("CODEX_EVAL_MAX_CONCURRENCY", "abc")
+
+    try:
+        eval_module.default_max_concurrency()
+    except SystemExit as exc:
+        assert "CODEX_EVAL_MAX_CONCURRENCY: must be an integer" in str(exc)
+    else:
+        raise AssertionError("expected invalid concurrency environment to exit cleanly")
 
 
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
