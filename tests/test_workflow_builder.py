@@ -24,7 +24,11 @@ def test_render_workflow_uses_configured_harness_model_and_prompt() -> None:
         "      delay_ms: 10000\n      on_error: all"
     ) in workflow
     assert "id: collect_github_context" in workflow
-    assert "Identify the canonical implementation transcript" in workflow
+    assert "id: find_implementation_transcript" in workflow
+    assert "code_reviewer.commands.discover_transcripts" in workflow
+    assert "--select" in workflow
+    assert "id: summarize_intent" in workflow
+    assert "code_reviewer.commands.summarize_intent" in workflow
     assert "Review this PR for correctness and regressions." in workflow
     assert "code_reviewer.commands.publish_review" in workflow
     assert "code_reviewer.commands.finalize_review" not in workflow

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import select
 import subprocess
 import sys
 import time
@@ -106,6 +107,12 @@ class ArchonClient:
         payload: Mapping[str, object],
         env: Mapping[str, str] | None = None,
     ) -> ArchonResult:
+        repository = payload.get("repository")
+        if isinstance(repository, str):
+            repair_note = repair_workspace_source_symlink(repository=repository, cwd=cwd)
+            if repair_note:
+                print(repair_note)
+
         command = [
             self.archon_bin,
             "workflow",
@@ -133,6 +140,30 @@ class ArchonClient:
 
         output_parts: list[str] = []
         assert process.stdout is not None
+        observed_archon_run_id: str | None = None
+        started_at = time.monotonic()
+        next_heartbeat_at = started_at + 60
+        while process.poll() is None:
+            ready, _, _ = select.select([process.stdout], [], [], 5)
+            if ready:
+                chunk = process.stdout.readline()
+                if chunk:
+                    output_parts.append(chunk)
+                    print(chunk, end="")
+                    observed_archon_run_id = observed_archon_run_id or extract_archon_run_id(chunk)
+                continue
+
+            now = time.monotonic()
+            if now >= next_heartbeat_at:
+                heartbeat = self.workflow_heartbeat(
+                    workflow_name=workflow_name,
+                    cwd=cwd,
+                    elapsed_seconds=now - started_at,
+                )
+                if heartbeat:
+                    observed_archon_run_id = observed_archon_run_id or heartbeat.id
+                next_heartbeat_at = now + 60
+
         for chunk in process.stdout:
             output_parts.append(chunk)
             print(chunk, end="")
@@ -141,8 +172,66 @@ class ArchonClient:
         return ArchonResult(
             returncode=returncode,
             output=output,
-            archon_run_id=extract_archon_run_id(output),
+            archon_run_id=extract_archon_run_id(output) or observed_archon_run_id,
         )
+
+    def workflow_heartbeat(
+        self,
+        *,
+        workflow_name: str,
+        cwd: Path,
+        elapsed_seconds: float,
+    ) -> ArchonRun | None:
+        try:
+            runs = self.active_runs(cwd=cwd)
+        except Exception as exc:
+            print(
+                f"Archon workflow still running after {elapsed_seconds:.0f}s; "
+                f"status unavailable: {exc}",
+                flush=True,
+            )
+            return None
+        matching = next((run for run in runs if run.workflow_name == workflow_name), None)
+        if matching is None:
+            print(
+                f"Archon workflow {workflow_name} still running after {elapsed_seconds:.0f}s; "
+                "not present in active run status.",
+                flush=True,
+            )
+            return None
+
+        last_activity = (
+            matching.raw.get("last_activity_at")
+            or matching.raw.get("lastActivityAt")
+            or "unknown"
+        )
+        print(
+            f"Archon workflow {workflow_name} still running after {elapsed_seconds:.0f}s "
+            f"(run={matching.id}, status={matching.status or 'unknown'}, "
+            f"last_activity={last_activity})",
+            flush=True,
+        )
+        return matching
+
+
+def repair_workspace_source_symlink(*, repository: str, cwd: Path) -> str | None:
+    parts = [part for part in repository.split("/") if part]
+    if len(parts) != 2:
+        return None
+    source_link = Path.home() / ".archon" / "workspaces" / parts[0] / parts[1] / "source"
+    if not source_link.is_symlink():
+        return None
+    current_target = source_link.resolve(strict=False)
+    expected_target = cwd.resolve()
+    if current_target == expected_target:
+        return None
+
+    source_link.unlink()
+    source_link.symlink_to(expected_target)
+    return (
+        "Repaired stale Archon source symlink: "
+        f"{source_link} was {current_target}, now {expected_target}"
+    )
 
 
 def extract_run_id(run: Mapping[str, Any]) -> str | None:

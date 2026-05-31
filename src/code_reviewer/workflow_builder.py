@@ -9,10 +9,13 @@ WORKFLOW_FILENAME = f"{WORKFLOW_NAME}.yaml"
 DEFAULT_HARNESS = "opencode"
 DEFAULT_MODEL = "opencode-go/deepseek-v4-pro"
 DEFAULT_ADDITIONAL_DIRECTORIES: tuple[str, ...] = ()
-AGENT_MAX_ATTEMPTS = 3
+AGENT_MAX_ATTEMPTS = 2
+AGENT_IDLE_TIMEOUT_MS = 180000
 BASH_NODE_IDS = (
     "prepare_worktree",
     "collect_github_context",
+    "find_implementation_transcript",
+    "summarize_intent",
     "publish_review",
     "cleanup_worktree",
 )
@@ -34,15 +37,6 @@ class AgentNode:
 
 
 AGENT_NODES = (
-    AgentNode(
-        "find_implementation_transcript",
-        "find_implementation_transcript.md",
-    ),
-    AgentNode(
-        "summarize_intent",
-        "summarize_intent.md",
-        ("prepare_worktree", "collect_github_context", "find_implementation_transcript"),
-    ),
     AgentNode(
         "reviewer_correctness_regressions",
         "reviewer_correctness_regressions.md",
@@ -114,6 +108,34 @@ def render_workflow(config: WorkflowConfig) -> str:
             '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.collect_github_context \\',
             '        --payload-json "$ARGUMENTS"',
             "",
+            f"  - id: {BASH_NODE_IDS[2]}",
+            "    bash: |",
+            '      set -euo pipefail',
+            '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.discover_transcripts \\',
+            '        --payload-json "$ARGUMENTS" \\',
+            '        --kanna-root "$HOME/.kanna" \\',
+            '        --cleaner loki \\',
+            '        --optional \\',
+            '        --select',
+            "",
+            f"  - id: {BASH_NODE_IDS[3]}",
+            "    bash: |",
+            '      set -euo pipefail',
+            '      transcript_selection_file="$(mktemp)"',
+            '      trap \'rm -f "$transcript_selection_file"\' EXIT',
+            '      cat > "$transcript_selection_file" <<\'CODE_REVIEW_TRANSCRIPT_SELECTION\'',
+            "      $find_implementation_transcript.output",
+            "      CODE_REVIEW_TRANSCRIPT_SELECTION",
+            '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.summarize_intent \\',
+            '        --payload-json "$ARGUMENTS" \\',
+            '        --github-context "$collect_github_context.output" \\',
+            '        --worktree-manifest "$prepare_worktree.output" \\',
+            '        --transcript-selection-file "$transcript_selection_file"',
+            "    depends_on:",
+            "      - prepare_worktree",
+            "      - collect_github_context",
+            "      - find_implementation_transcript",
+            "",
         ]
     )
 
@@ -122,7 +144,7 @@ def render_workflow(config: WorkflowConfig) -> str:
 
     lines.extend(
         [
-            f"  - id: {BASH_NODE_IDS[2]}",
+            f"  - id: {BASH_NODE_IDS[4]}",
             "    bash: |",
             '      set -euo pipefail',
             '      aggregate_output_file="$(mktemp)"',
@@ -140,7 +162,7 @@ def render_workflow(config: WorkflowConfig) -> str:
             "      - collect_github_context",
             "      - aggregate_dedupe",
             "",
-            f"  - id: {BASH_NODE_IDS[3]}",
+            f"  - id: {BASH_NODE_IDS[5]}",
             "    bash: |",
             '      set -euo pipefail',
             '      "${CODE_REVIEW_PYTHON:-python3}" -m code_reviewer.commands.cleanup_worktree \\',
@@ -160,7 +182,7 @@ def render_agent_node(node: AgentNode, model: str) -> list[str]:
         f"  - id: {node.id}",
         "    context: fresh",
         f"    model: {model}",
-        "    idle_timeout: 600000",
+        f"    idle_timeout: {AGENT_IDLE_TIMEOUT_MS}",
         "    retry:",
         f"      max_attempts: {AGENT_MAX_ATTEMPTS}",
         "      delay_ms: 10000",

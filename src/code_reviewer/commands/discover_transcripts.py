@@ -20,6 +20,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--kanna-root", default="~/.kanna")
     parser.add_argument("--cleaner", default="builtin")
     parser.add_argument("--optional", action="store_true")
+    parser.add_argument(
+        "--select",
+        action="store_true",
+        help="Print deterministic implementation-transcript selection Markdown.",
+    )
     args = parser.parse_args(argv)
 
     payload = load_json_arg(args.payload_json)
@@ -93,8 +98,89 @@ def main(argv: list[str] | None = None) -> int:
         ),
         encoding="utf-8",
     )
-    print(report_path)
+    if args.select:
+        print(
+            render_selection(
+                report_path=report_path,
+                exact_matches=exact_matches,
+                fallback_matches=fallback_matches,
+                selected_matches=matches,
+            ),
+            end="",
+        )
+    else:
+        print(report_path)
     return 0
+
+
+def render_selection(
+    *,
+    report_path: Path,
+    exact_matches: list[dict[str, Any]],
+    fallback_matches: list[dict[str, Any]],
+    selected_matches: list[dict[str, Any]],
+) -> str:
+    if not selected_matches:
+        return "\n".join(
+            [
+                "- Selected transcript: `none`",
+                "- Source transcript: `none`",
+                "- Confidence: none",
+                "- Reason:",
+                "  - No transcript candidates matched the PR URL, head SHA, PR shorthand, or repository.",
+                f"  - Candidate report: `{report_path}`",
+                "- Useful quotes: none",
+                "",
+            ]
+        )
+
+    selected = selected_matches[0]
+    has_exact_match = selected in exact_matches
+    if not has_exact_match:
+        return "\n".join(
+            [
+                "- Selected transcript: `none`",
+                "- Source transcript: `none`",
+                "- Confidence: none",
+                "- Reason:",
+                "  - Only repository-level fallback transcript candidates were found.",
+                "  - Fallback matches are too broad to select as implementation intent automatically.",
+                f"  - Candidate report: `{report_path}`",
+                "- Useful quotes: none",
+                "",
+            ]
+        )
+
+    if len(exact_matches) > 1:
+        return "\n".join(
+            [
+                "- Selected transcript: `none`",
+                "- Source transcript: `none`",
+                "- Confidence: none",
+                "- Reason:",
+                "  - Multiple PR-specific transcript candidates were found.",
+                "  - Automatic selection is disabled for ambiguous exact matches to avoid feeding the wrong or excessive transcript context into review.",
+                f"  - Candidate report: `{report_path}`",
+                "- Useful quotes: none",
+                "",
+            ]
+        )
+
+    reason = [
+        "  - Candidate matched exact PR-specific terms such as the PR URL, head SHA, or PR shorthand.",
+        f"  - Candidate report: `{report_path}`",
+    ]
+    return "\n".join(
+        [
+            f"- Selected transcript: `{selected['normalized_path']}`",
+            f"- Source transcript: `{selected['source_path']}`",
+            "- Confidence: high",
+            "- Reason:",
+            *reason,
+            "- Useful quotes: none",
+            "",
+        ]
+    )
 
 
 def render_candidate_report(
