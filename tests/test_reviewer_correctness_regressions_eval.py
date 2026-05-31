@@ -84,6 +84,21 @@ def test_scores_are_minimal_shape_checks() -> None:
     assert shape.score == 1.0
 
 
+def test_code_reviewer_case_captures_validated_pr8_regression() -> None:
+    case = next(
+        case
+        for case in eval_module.CASES
+        if case["name"] == "code-reviewer-publish-blocking-count-override"
+    )
+
+    assert case["source_pr"] == "https://github.com/sahilsk11/code-reviewer/pull/8"
+    assert case["base_sha"] == "69c41ee0a1350dfa09818bce929eec5fdc06d758"
+    assert case["head_sha"] == "b19ebf5093a7c82f04b980c2f332247a978232c8"
+    assert case["validated_comments"][0]["grade"] == "partial"
+    assert "blocking_count" in case["validated_comments"][0]["body"]
+    assert any("undercount blocking comments" in item for item in case["must_notice"])
+
+
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],

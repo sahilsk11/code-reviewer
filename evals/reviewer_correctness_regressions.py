@@ -36,7 +36,46 @@ CASES: list[dict[str, Any]] = [
             "Removes legacy final recovery paths and moves provider-final "
             "handling toward explicit turn ownership."
         ),
-    }
+    },
+    {
+        "name": "code-reviewer-publish-blocking-count-override",
+        "repo": "https://github.com/sahilsk11/code-reviewer.git",
+        "base_sha": "69c41ee0a1350dfa09818bce929eec5fdc06d758",
+        "head_sha": "b19ebf5093a7c82f04b980c2f332247a978232c8",
+        "source_pr": "https://github.com/sahilsk11/code-reviewer/pull/8",
+        "title": "Move review publication into deterministic commands",
+        "body": (
+            "Adds deterministic GitHub context collection, replaces the publish "
+            "agent with a Python publisher, and rewires cleanup around the "
+            "managed review worktree."
+        ),
+        "validated_comments": [
+            {
+                "grade": "partial",
+                "url": "https://github.com/sahilsk11/code-reviewer/pull/8#issuecomment-4584991993",
+                "body": (
+                    "`count_blocking` gives priority to a top-level "
+                    "`blocking_count` over per-comment `blocking: true`, so a "
+                    "payload with `blocking_count: 0` can silently ignore a "
+                    "blocking comment."
+                ),
+            }
+        ],
+        "must_notice": [
+            (
+                "count_blocking can undercount blocking comments when the "
+                "payload also includes a stale or contradictory blocking_count"
+            ),
+            (
+                "the publisher can treat a review containing blocking comments "
+                "as non-blocking if blocking_count is 0"
+            ),
+        ],
+        "avoid": [
+            "treating the issue as only style or cleanup",
+            "requiring the agent output to match the original review wording",
+        ],
+    },
 ]
 
 
