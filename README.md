@@ -147,3 +147,17 @@ python -m ruff check .
 python -m pyright
 python -m pytest
 ```
+
+## Evals
+
+Run the Braintrust eval for the correctness/regressions reviewer prompt:
+
+```sh
+BRAINTRUST_API_KEY=... python evals/reviewer_correctness_regressions.py
+```
+
+Cases are plain Python dictionaries in that file. Each case names a real repo
+plus immutable base/head commits. The eval clones the repo into a temporary
+checkout, renders `reviewer_correctness_regressions.md` with minimal
+Archon-style context, runs `codex exec` locally, and uploads the local task
+output plus lightweight Python scores to Braintrust.
