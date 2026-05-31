@@ -16,15 +16,12 @@ def test_read_local_prompts_follows_workflow_nodes() -> None:
     prompts = prompt_sync.read_local_prompts()
 
     assert [prompt.slug for prompt in prompts] == [
-        "find_implementation_transcript",
-        "summarize_intent",
         "reviewer_correctness_regressions",
         "reviewer_design_layering_reuse",
         "reviewer_simplicity_alternatives",
         "aggregate_dedupe",
     ]
-    assert prompts[0].prompt_file == "find_implementation_transcript.md"
-    assert "$HOME" in prompts[0].rendered_text
+    assert prompts[0].prompt_file == "reviewer_correctness_regressions.md"
     assert "{{ARGUMENTS}}" in prompts[0].rendered_text
 
 
@@ -33,13 +30,13 @@ def test_sync_prompts_dry_run_returns_braintrust_prompt_inputs(monkeypatch) -> N
 
     results = prompt_sync.sync_prompts(project_name="Code Reviewer", dry_run=True)
 
-    assert len(results) == 6
-    assert results[0].slug == "find_implementation_transcript"
+    assert len(results) == 4
+    assert results[0].slug == "reviewer_correctness_regressions"
     assert results[0].project_name == "Code Reviewer"
     assert results[0].messages is not None
     assert results[0].messages[0]["role"] == "user"
     assert results[0].model
-    assert results[0].metadata["workflow_node"] == "find_implementation_transcript"
+    assert results[0].metadata["workflow_node"] == "reviewer_correctness_regressions"
     assert "archon" in results[0].tags
 
 

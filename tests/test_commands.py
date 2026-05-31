@@ -10,6 +10,7 @@ from code_reviewer.commands import (
     discover_transcripts,
     prepare_worktree,
     publish_review,
+    summarize_intent,
 )
 
 
@@ -128,6 +129,133 @@ def test_discover_transcripts_prefers_exact_pr_matches(tmp_path: Path, monkeypat
     assert [message["role"] for message in normalized["messages"]] == ["user", "assistant"]
 
 
+def test_discover_transcripts_selects_exact_match_without_ai(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    data_dir = tmp_path / ".kanna" / "data"
+    transcripts = data_dir / "transcripts"
+    transcripts.mkdir(parents=True)
+    (data_dir / "snapshot.json").write_text(
+        json.dumps({"chats": [{"id": "exact", "title": "Exact", "projectId": "p1"}]}),
+        encoding="utf-8",
+    )
+    (transcripts / "exact.jsonl").write_text(
+        json.dumps(
+            {
+                "_id": "u1",
+                "kind": "user_prompt",
+                "createdAt": 1,
+                "content": "implement https://github.com/owner/repo/pull/7",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = discover_transcripts.main(
+        [
+            "--payload-json",
+            json.dumps(
+                {
+                    "pull_request_url": "https://github.com/owner/repo/pull/7",
+                    "head_sha": "abc123",
+                }
+            ),
+            "--kanna-root",
+            str(tmp_path / ".kanna"),
+            "--optional",
+            "--select",
+        ]
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "- Selected transcript: `" in output
+    assert "exact.json" in output
+    assert "- Confidence: high" in output
+
+
+def test_discover_transcripts_does_not_select_fallback_only_match(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    data_dir = tmp_path / ".kanna" / "data"
+    transcripts = data_dir / "transcripts"
+    transcripts.mkdir(parents=True)
+    (data_dir / "snapshot.json").write_text("{}", encoding="utf-8")
+    (transcripts / "fallback.jsonl").write_text(
+        json.dumps(
+            {
+                "_id": "u1",
+                "kind": "user_prompt",
+                "createdAt": 1,
+                "content": "owner/repo only",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = discover_transcripts.main(
+        [
+            "--payload-json",
+            json.dumps({"pull_request_url": "https://github.com/owner/repo/pull/7"}),
+            "--kanna-root",
+            str(tmp_path / ".kanna"),
+            "--optional",
+            "--select",
+        ]
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "- Selected transcript: `none`" in output
+    assert "Only repository-level fallback transcript candidates were found." in output
+
+
+def test_discover_transcripts_does_not_select_ambiguous_exact_matches(
+    tmp_path: Path,
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    data_dir = tmp_path / ".kanna" / "data"
+    transcripts = data_dir / "transcripts"
+    transcripts.mkdir(parents=True)
+    (data_dir / "snapshot.json").write_text("{}", encoding="utf-8")
+    for name in ("first", "second"):
+        (transcripts / f"{name}.jsonl").write_text(
+            json.dumps(
+                {
+                    "_id": name,
+                    "kind": "user_prompt",
+                    "createdAt": 1,
+                    "content": "https://github.com/owner/repo/pull/7",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    result = discover_transcripts.main(
+        [
+            "--payload-json",
+            json.dumps({"pull_request_url": "https://github.com/owner/repo/pull/7"}),
+            "--kanna-root",
+            str(tmp_path / ".kanna"),
+            "--optional",
+            "--select",
+        ]
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "- Selected transcript: `none`" in output
+    assert "Multiple PR-specific transcript candidates were found." in output
+
+
 def test_cleanup_worktree_strips_archon_wrapping_quotes(tmp_path: Path) -> None:
     source_repo = tmp_path / "repo"
     source_repo.mkdir()
@@ -182,6 +310,63 @@ def test_collect_github_context_writes_context_file(tmp_path: Path) -> None:
 def test_collect_github_context_flattens_paginated_api_results() -> None:
     with patch.object(collect_github_context, "gh_json_value", return_value=[[{"id": 1}], [{"id": 2}]]):
         assert collect_github_context.gh_api_list(["api", "endpoint"]) == [{"id": 1}, {"id": 2}]
+
+
+def test_summarize_intent_writes_deterministic_review_brief(tmp_path: Path, capsys) -> None:
+    context = tmp_path / "context.json"
+    context.write_text(
+        json.dumps(
+            {
+                "repository": "owner/repo",
+                "pr_number": 7,
+                "pr": {
+                    "url": "https://github.com/owner/repo/pull/7",
+                    "title": "Improve deploy review",
+                    "body": "Make the review pipeline less flaky.",
+                    "headRefOid": "abc123",
+                    "baseRefOid": "def456",
+                    "headRefName": "feature",
+                    "baseRefName": "main",
+                    "state": "OPEN",
+                    "isDraft": False,
+                    "commits": [{"oid": "abc123456789", "messageHeadline": "Fix flake"}],
+                },
+                "files": [{"filename": "src/app.py", "status": "modified", "additions": 2, "deletions": 1}],
+                "issue_comments": [{}],
+                "review_comments": [{}, {}],
+                "reviews": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(
+        json.dumps({"repository": "owner/repo", "pr_number": 7, "head_sha": "abc123"}),
+        encoding="utf-8",
+    )
+    transcript = tmp_path / "transcript.md"
+    transcript.write_text("- Selected transcript: `none`\n", encoding="utf-8")
+
+    result = summarize_intent.main(
+        [
+            "--payload-json",
+            json.dumps({"repository": "owner/repo", "pull_request_number": 7, "mode": "incremental"}),
+            "--github-context",
+            f"'{context}'",
+            "--worktree-manifest",
+            f"'{manifest}'",
+            "--transcript-selection-file",
+            f"'{transcript}'",
+        ]
+    )
+
+    assert result == 0
+    output = capsys.readouterr().out
+    assert "# Review Brief" in output
+    assert "Improve deploy review" in output
+    assert "`src/app.py`" in output
+    assert "Issue comments: `1`" in output
+    assert "- Selected transcript: `none`" in output
 
 
 def test_publish_review_dry_run_reports_blocking_comment_without_failing(
