@@ -101,8 +101,9 @@ pull requests and pushes to `main`. It runs Ruff, Pyright, and pytest on a
 GitHub-hosted runner. It does not invoke `code-review review`, Archon, Codex, or
 the self-hosted AI review runner.
 
-Configure branch protection against the `Python Checks` job if this repository
-needs a required CI check.
+Before merging this workflow replacement, update branch protection rules that
+previously required `AI Code Review`. Configure branch protection against the
+`Python Checks` job if this repository needs a required CI check.
 
 ## Workflow And State
 

@@ -8,10 +8,7 @@ WORKFLOW_NAME = "ai-code-review"
 WORKFLOW_FILENAME = f"{WORKFLOW_NAME}.yaml"
 DEFAULT_HARNESS = "opencode"
 DEFAULT_MODEL = "opencode-go/deepseek-v4-pro"
-DEFAULT_ADDITIONAL_DIRECTORIES = (
-    "/home/code-reviewer/wt",
-    "/home/code-reviewer/.kanna",
-)
+DEFAULT_ADDITIONAL_DIRECTORIES: tuple[str, ...] = ()
 BASH_NODE_IDS = (
     "prepare_worktree",
     "collect_github_context",

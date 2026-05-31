@@ -13,6 +13,7 @@ def test_render_workflow_uses_configured_harness_model_and_prompt() -> None:
     assert "name: ai-code-review-test" in workflow
     assert "provider: codex" in workflow
     assert "model: gpt-test" in workflow
+    assert "/home/code-reviewer" not in workflow
     assert "id: collect_github_context" in workflow
     assert "Identify the canonical implementation transcript" in workflow
     assert "Review this PR for correctness and regressions." in workflow

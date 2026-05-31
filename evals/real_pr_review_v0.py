@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     result = Eval(
         args.project,
         experiment_name=f"real-pr-review-v0-{slug(args.model)}",
+        # Braintrust's Eval data type is narrower than the case dictionaries accepted at runtime.
         data=cast(Any, cases),
         task=lambda input: review_case(
             input,

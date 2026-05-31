@@ -45,6 +45,7 @@ target-version = "py311"
 line-length = 100
 
 [tool.ruff.lint]
+# Keep this aligned with the sibling Python backend template's rule families.
 select = [
   "F",    # pyflakes: undefined names, unused imports, and invalid bindings
   "I",    # isort: import ordering
@@ -58,6 +59,9 @@ select = [
 extend-ignore = [
   "B008",
 ]
+
+[tool.ruff.lint.isort]
+known-first-party = ["code_reviewer"]
 
 [tool.pyright]
 pythonVersion = "3.11"
