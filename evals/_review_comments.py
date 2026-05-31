@@ -12,8 +12,7 @@ def run(command: list[str], *, cwd: Path | None = None) -> subprocess.CompletedP
         cwd=cwd,
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
 
 

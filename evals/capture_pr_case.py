@@ -170,8 +170,7 @@ def gh_pr_view(pr_url: str) -> dict[str, Any]:
         ["gh", "pr", "view", pr_url, "--json", fields],
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     return json.loads(completed.stdout)
 
@@ -181,8 +180,7 @@ def gh_pr_review_comments(*, repo: str, pr_number: int, author: str, commit_sha:
         ["gh", "api", f"repos/{repo}/pulls/{pr_number}/comments", "--paginate", "--slurp"],
         check=True,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     comments = flatten_pages(json.loads(completed.stdout))
     return [

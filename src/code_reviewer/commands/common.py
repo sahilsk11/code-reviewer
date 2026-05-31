@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 
 def load_json_arg(value: str) -> dict[str, Any]:
@@ -46,8 +47,7 @@ def run(
         cwd=str(cwd) if cwd else None,
         check=check,
         text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
 
 

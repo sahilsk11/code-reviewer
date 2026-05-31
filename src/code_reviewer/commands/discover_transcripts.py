@@ -6,7 +6,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from code_reviewer.commands.common import load_json_arg, parse_pr_url, sanitize_path_part, write_json
+from code_reviewer.commands.common import (
+    load_json_arg,
+    parse_pr_url,
+    sanitize_path_part,
+    write_json,
+)
 
 
 def main(argv: list[str] | None = None) -> int:

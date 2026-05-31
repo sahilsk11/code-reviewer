@@ -18,7 +18,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "pyright>=1.1.380",
   "pytest>=8.0",
+  "ruff>=0.7.0",
 ]
 
 [project.scripts]
@@ -37,3 +39,30 @@ packages = ["src/code_reviewer"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+  "F",    # pyflakes: undefined names, unused imports, and invalid bindings
+  "I",    # isort: import ordering
+  "B",    # bugbear: likely bugs and footguns
+  "C4",   # comprehensions: clearer list/dict/set construction
+  "SIM",  # simplify: redundant branches and boolean expressions
+  "UP",   # pyupgrade: keep syntax current for the supported Python version
+  "PERF", # perflint: avoid avoidable hot-path overhead
+  "RET",  # return: consistent return paths and unnecessary else blocks
+]
+extend-ignore = [
+  "B008",
+]
+
+[tool.pyright]
+pythonVersion = "3.11"
+include = ["src", "tests", "evals"]
+exclude = [
+  "**/__pycache__",
+  ".venv",
+]

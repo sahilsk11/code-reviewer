@@ -15,7 +15,6 @@ from code_reviewer.commands.common import (
     run,
 )
 
-
 JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(?P<body>.*?)\s*```", re.IGNORECASE | re.DOTALL)
 
 

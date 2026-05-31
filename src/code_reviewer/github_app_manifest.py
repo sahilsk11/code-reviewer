@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Iterable
 from importlib import resources
-from typing import Any, Iterable
+from typing import Any
 
 RESOURCE_PACKAGE = "code_reviewer.resources"
 MANIFEST_RESOURCE = "github-app-manifest.json"

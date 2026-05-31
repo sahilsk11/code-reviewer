@@ -8,9 +8,10 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from braintrust import Eval, Score
+
 from code_reviewer.env import braintrust_project, load_local_env
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     result = Eval(
         args.project,
         experiment_name=f"real-pr-review-v0-{slug(args.model)}",
-        data=cases,
+        data=cast(Any, cases),
         task=lambda input: review_case(
             input,
             model=args.model,
@@ -174,8 +175,7 @@ Diff:
             command,
             input=prompt,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=timeout,
             check=False,
         )
@@ -255,8 +255,7 @@ Review output:
             command,
             input=prompt,
             text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            capture_output=True,
             timeout=timeout,
             check=False,
         )

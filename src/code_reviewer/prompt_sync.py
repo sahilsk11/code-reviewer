@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from code_reviewer.env import braintrust_project, load_local_env
-from code_reviewer.workflow_builder import BASH_NODE_IDS, AGENT_NODES, DEFAULT_MODEL, read_prompt
+from code_reviewer.workflow_builder import AGENT_NODES, BASH_NODE_IDS, DEFAULT_MODEL, read_prompt
 
 PROMPT_TAGS = ("code-reviewer", "archon", "auto-sync")
 
