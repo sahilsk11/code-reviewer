@@ -109,13 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         data=[
             {
                 "input": case,
-                "metadata": {
-                    "case": case["name"],
-                    "repo": case["repo"],
-                    "base_sha": case["base_sha"],
-                    "head_sha": case["head_sha"],
-                    "prompt_node": PROMPT_NODE,
-                },
+                "metadata": case_metadata(case, model=args.model),
             }
             for case in CASES
         ],
@@ -130,6 +124,21 @@ def main(argv: list[str] | None = None) -> int:
     )
     print(result.summary)
     return 0
+
+
+def case_metadata(case: dict[str, Any], *, model: str) -> dict[str, Any]:
+    return {
+        "eval_case": case["name"],
+        "case": case["name"],
+        "case_kind": "validated_pr" if case.get("source_pr") else "curated_pr",
+        "repo": case["repo"],
+        "source_pr": case.get("source_pr"),
+        "base_sha": case["base_sha"],
+        "head_sha": case["head_sha"],
+        "model": model,
+        "prompt_node": PROMPT_NODE,
+        "prompt_file": f"src/code_reviewer/prompts/{PROMPT_FILE}",
+    }
 
 
 def run_case(case: dict[str, Any], *, model: str, timeout: int) -> dict[str, Any]:

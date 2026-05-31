@@ -126,6 +126,29 @@ def test_code_reviewer_case_captures_validated_pr8_regression() -> None:
     assert ["count_blocking"] in case["must_notice_terms"]
 
 
+def test_case_metadata_exposes_braintrust_filter_fields() -> None:
+    case = next(
+        case
+        for case in eval_module.CASES
+        if case["name"] == "code-reviewer-publish-blocking-count-override"
+    )
+
+    metadata = eval_module.case_metadata(case, model="gpt-test")
+
+    assert metadata == {
+        "eval_case": "code-reviewer-publish-blocking-count-override",
+        "case": "code-reviewer-publish-blocking-count-override",
+        "case_kind": "validated_pr",
+        "repo": "https://github.com/sahilsk11/code-reviewer.git",
+        "source_pr": "https://github.com/sahilsk11/code-reviewer/pull/8",
+        "base_sha": "69c41ee0a1350dfa09818bce929eec5fdc06d758",
+        "head_sha": "b19ebf5093a7c82f04b980c2f332247a978232c8",
+        "model": "gpt-test",
+        "prompt_node": "reviewer_correctness_regressions",
+        "prompt_file": "src/code_reviewer/prompts/reviewer_correctness_regressions.md",
+    }
+
+
 def git(cwd: Path, *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         ["git", *args],
